@@ -145,7 +145,7 @@ PDM-входе даст артефакты — фоллбэк: писать на
 
 ### Конфиг (env)
 `YANDEX_API_KEY`, `YANDEX_FOLDER_ID`, `PUBLIC_BASE_URL` (LAN-адрес:порт, по которому
-часы достанут аудио), `SESSION_TTL` (сек), `MAX_REPLY_TOKENS`/системный промпт.
+часы достанут аудио), `SESSION_TTL` (сек), `MAX_TOKENS`, `YANDEX_VOICE`, `SYSTEM_PROMPT`.
 
 ### Хранение и чистка
 - История: `data/sessions/UUID.txt`, формат построчно `user:`/`bot:`.

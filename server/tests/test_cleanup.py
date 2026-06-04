@@ -18,3 +18,7 @@ def test_cleanup_removes_old_and_keeps_fresh(tmp_path):
     assert not old_txt.exists()
     assert not aud.exists()        # пустой каталог сессии тоже убран
     assert fresh.exists()
+
+def test_cleanup_cold_start_no_dirs(tmp_path):
+    # первый запуск сервера: каталогов sessions/audio ещё нет — не должно падать
+    cleanup.cleanup_old(tmp_path, ttl_seconds=3600, now=time.time())
