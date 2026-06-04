@@ -24,3 +24,10 @@ void  soundBeep(int freq, int durMs);
 // Проиграть звук-файл из SPIFFS (например "/sfx/hit.wav"). Асинхронно.
 // Возвращает false, если файла нет — тогда сыграй beep-фоллбэк.
 bool  soundPlayFile(const char *path);
+
+// ── Захват PDM-микрофона (T-Watch V3: clk GPIO0, data GPIO2) ──
+// Делит I2S0 с выводом звука: запись и воспроизведение НЕ одновременно.
+// micCaptureBegin переключает I2S0 в PDM RX, micCaptureEnd возвращает в TX.
+bool micCaptureBegin();                       // false при неудаче установки драйвера
+int  micCaptureRead(int16_t *dst, int maxSamples);   // выгрести доступные сэмплы (неблокирующе)
+void micCaptureEnd();                         // вернуть I2S0 в TX (для воспроизведения)

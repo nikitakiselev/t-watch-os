@@ -11,6 +11,10 @@ static const int I2S_BCK  = 26;
 static const int I2S_WS   = 25;
 static const int I2S_DOUT = 33;
 
+// Пины PDM-микрофона T-Watch 2020 V3.
+static const int MIC_DATA  = 2;     // GPIO2 — PDM data (data_in)
+static const int MIC_CLOCK = 0;     // GPIO0 — PDM clock (на ws_io_num)
+
 static Audio        audio;
 static TaskHandle_t taskH = nullptr;
 
@@ -144,6 +148,68 @@ void soundBeep(int freq, int durMs)
     // хвост тишины — дать доиграть и не зациклить последний буфер
     memset(buf, 0, sizeof(buf));
     i2s_write(I2S_NUM_0, buf, sizeof(buf), &bw, portMAX_DELAY);
+
+    if (taskH) vTaskResume(taskH);
+}
+
+// Установить I2S0 в режим PDM RX (приостановив аудио-задачу, владеющую I2S0).
+bool micCaptureBegin()
+{
+    if (taskH) vTaskSuspend(taskH);
+    i2s_driver_uninstall(I2S_NUM_0);
+
+    i2s_config_t cfg = {};
+    cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);
+    cfg.sample_rate = 16000;
+    cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    cfg.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
+    cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+    cfg.dma_buf_count = 4;
+    cfg.dma_buf_len = 256;
+    if (i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL) != ESP_OK) {
+        if (taskH) vTaskResume(taskH);
+        return false;
+    }
+    i2s_pin_config_t pin = {};
+    pin.bck_io_num = I2S_PIN_NO_CHANGE;
+    pin.ws_io_num = MIC_CLOCK;
+    pin.data_out_num = I2S_PIN_NO_CHANGE;
+    pin.data_in_num = MIC_DATA;
+    i2s_set_pin(I2S_NUM_0, &pin);
+    i2s_set_clk(I2S_NUM_0, 16000, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+    return true;
+}
+
+// Выгрести доступные сэмплы (неблокирующе: таймаут 0). Возвращает число int16-сэмплов.
+int micCaptureRead(int16_t *dst, int maxSamples)
+{
+    size_t bytesRead = 0;
+    i2s_read(I2S_NUM_0, (char *)dst, maxSamples * sizeof(int16_t), &bytesRead, 0);
+    return (int)(bytesRead / sizeof(int16_t));
+}
+
+// Вернуть I2S0 в TX-конфиг библиотеки Audio и пины динамика, resume аудио-задачи.
+void micCaptureEnd()
+{
+    i2s_driver_uninstall(I2S_NUM_0);
+
+    i2s_config_t cfg = {};
+    cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+    cfg.sample_rate = 16000;
+    cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    cfg.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S);  // ядро 2.0.17
+    cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+    cfg.dma_buf_count = 8;
+    cfg.dma_buf_len = 1024;
+    cfg.use_apll = false;
+    cfg.tx_desc_auto_clear = true;
+    cfg.fixed_mclk = I2S_PIN_NO_CHANGE;
+    i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+
+    audio.setPinout(I2S_BCK, I2S_WS, I2S_DOUT);   // вернуть пины динамика
+    audio.setVolume((uint8_t)volume);
 
     if (taskH) vTaskResume(taskH);
 }
