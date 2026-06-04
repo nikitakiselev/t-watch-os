@@ -58,8 +58,8 @@ def test_index_served(tmp_path, monkeypatch):
 
 def test_sessions_list_and_detail(tmp_path, monkeypatch):
     from server import sessions
-    sessions.append_turn(tmp_path, "sid-1", "user", "привет")
-    sessions.append_turn(tmp_path, "sid-1", "bot", "здравствуй")
+    sessions.append_turn(tmp_path, "sid-1", "user", "привет", audio="in_0.wav")
+    sessions.append_turn(tmp_path, "sid-1", "bot", "здравствуй", audio="0.mp3")
     (tmp_path / "audio" / "sid-1").mkdir(parents=True)
     (tmp_path / "audio" / "sid-1" / "0.mp3").write_bytes(b"M")
     c = make_client(tmp_path, monkeypatch)
@@ -73,8 +73,9 @@ def test_sessions_list_and_detail(tmp_path, monkeypatch):
     r = c.get("/sessions/sid-1")
     assert r.status_code == 200
     body = r.json()
-    assert body["turns"] == [{"role": "user", "text": "привет"},
-                             {"role": "bot", "text": "здравствуй"}]
+    assert body["turns"] == [
+        {"role": "user", "text": "привет", "audio": "in_0.wav"},
+        {"role": "bot", "text": "здравствуй", "audio": "0.mp3"}]
     assert body["audio"] == ["0.mp3"]
 
 

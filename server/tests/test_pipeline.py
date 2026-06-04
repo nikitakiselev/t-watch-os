@@ -22,10 +22,14 @@ def test_process_turn_full_flow(tmp_path, monkeypatch):
     assert seen["messages"][0] == {"role": "system", "text": "будь краток"}
     assert seen["messages"][-1] == {"role": "user", "text": "как дела"}
     assert sessions.read_history(tmp_path, "sid-1") == [
-        ("user", "как дела"), ("bot", "нормально")]
+        {"role": "user", "text": "как дела", "audio": "in_0.wav"},
+        {"role": "bot", "text": "нормально", "audio": "0.mp3"}]
     assert url == "http://h:8080/audio/sid-1/0.mp3"
     saved = (tmp_path / "audio" / "sid-1" / "0.mp3").read_bytes()
     assert saved == b"MP3"
+    # входящая запись сохранена как WAV (RIFF-заголовок)
+    wav = (tmp_path / "audio" / "sid-1" / "in_0.wav").read_bytes()
+    assert wav[:4] == b"RIFF" and wav[8:12] == b"WAVE"
 
 
 def test_process_turn_includes_prior_context(tmp_path, monkeypatch):
@@ -56,9 +60,12 @@ def test_process_turn_strips_trailing_slash_in_base_url(tmp_path, monkeypatch):
     assert url == "http://h:8080/audio/sid-9/0.mp3"   # ровно один слэш
 
 
-def test_process_turn_empty_stt_skips(tmp_path, monkeypatch):
+def test_process_turn_empty_stt_saves_audio_no_reply(tmp_path, monkeypatch):
     s = Settings(data_dir=tmp_path)
     monkeypatch.setattr(pipeline.yandex, "stt_recognize", lambda a, **k: "   ")
     url = pipeline.process_turn(s, "sid-3", b"x")
     assert url is None
-    assert sessions.read_history(tmp_path, "sid-3") == []
+    # ход пользователя записан с пустым текстом, запись слышна в истории
+    assert sessions.read_history(tmp_path, "sid-3") == [
+        {"role": "user", "text": "", "audio": "in_0.wav"}]
+    assert (tmp_path / "audio" / "sid-3" / "in_0.wav").exists()

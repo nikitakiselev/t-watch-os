@@ -46,7 +46,8 @@
   #tabbar button.active { color:var(--amber); border-color:var(--amber); background:#150f00; }
   #tabbar button:not(.active):hover { color:var(--green); border-color:var(--green); }
 
-  /* ── sessions view ── */
+  /* ── views (ровно один видим; переключаем через style.display, не [hidden]) ── */
+  #view-talk { width:100%; display:flex; flex-direction:column; align-items:center; gap:16px; }
   #view-sessions { width:100%; max-width:520px; display:flex; flex-direction:column; gap:12px; }
   #sess-header { display:flex; align-items:center; gap:10px; }
   #sess-refresh { font:inherit; font-size:11px; background:none; color:var(--dim);
@@ -86,7 +87,7 @@
     <button id="tab-sessions">Sessions</button>
   </div>
 
-  <div id="view-talk" style="display:contents">
+  <div id="view-talk">
     <div id="session">session: <span id="sid">—</span><button id="newSession">new</button></div>
     <button id="mic">hold&nbsp;to&nbsp;talk</button>
     <div id="status">idle</div>
@@ -95,13 +96,13 @@
     <div class="hint">Зажми кнопку и говори, отпусти — отправится. Нужен доступ к микрофону и HTTPS либо localhost.</div>
   </div>
 
-  <div id="view-sessions" hidden>
+  <div id="view-sessions">
     <div id="sess-header">
       <button id="sess-refresh">↻ refresh</button>
-      <span id="sess-hint" class="hint">click a session to view its transcript and audio</span>
+      <span id="sess-hint" class="hint">выбери сессию — увидишь реплики и аудио рядом</span>
     </div>
     <div id="sess-list"><div class="sess-empty">loading…</div></div>
-    <div id="sess-detail"><div class="sess-empty" style="color:var(--dim)">select a session above</div></div>
+    <div id="sess-detail"><div class="sess-empty">select a session above</div></div>
   </div>
 
 <script>
@@ -322,22 +323,18 @@ const sessList     = document.getElementById("sess-list");
 const sessDetail   = document.getElementById("sess-detail");
 
 function switchTab(name) {
-  if (name === "talk") {
-    viewTalk.hidden     = false;
-    viewSessions.hidden = true;
-    tabTalk.classList.add("active");
-    tabSessions.classList.remove("active");
-  } else {
-    viewTalk.hidden     = true;
-    viewSessions.hidden = false;
-    tabTalk.classList.remove("active");
-    tabSessions.classList.add("active");
-    loadSessions();
-  }
+  const talk = name === "talk";
+  // Переключаем через display напрямую — [hidden] перебивался бы #id-правилом display.
+  viewTalk.style.display     = talk ? "flex" : "none";
+  viewSessions.style.display = talk ? "none" : "flex";
+  tabTalk.classList.toggle("active", talk);
+  tabSessions.classList.toggle("active", !talk);
+  if (!talk) loadSessions();
 }
 
 tabTalk.addEventListener("click",     () => switchTab("talk"));
 tabSessions.addEventListener("click", () => switchTab("sessions"));
+switchTab("talk");   // стартовое состояние: видна только вкладка Talk
 
 async function loadSessions() {
   sessList.innerHTML = '<div class="sess-empty">loading…</div>';
@@ -399,33 +396,31 @@ async function openSession(id) {
     sessDetail.appendChild(idLine);
 
     const turns = data.turns || [];
-    for (const t of turns) {
-      const div = document.createElement("div");
-      div.className = "sd-turn " + (t.role === "user" ? "user" : "bot");
-      div.textContent = (t.role === "user" ? "▶ you: " : "◀ bot: ") + t.text;
-      sessDetail.appendChild(div);
-    }
-
-    const audioFiles = data.audio || [];
-    if (audioFiles.length > 0) {
-      const wrap = document.createElement("div");
-      wrap.className = "sd-audio-wrap";
-      for (const filename of audioFiles) {
-        const lbl = document.createElement("div");
-        lbl.className = "sd-audio-label";
-        lbl.textContent = filename;
-        const player = document.createElement("audio");
-        player.controls = true;
-        player.src = "/audio/" + encodeURIComponent(id) + "/" + filename;
-        wrap.appendChild(lbl);
-        wrap.appendChild(player);
-      }
-      sessDetail.appendChild(wrap);
-    } else if (turns.length === 0) {
+    if (turns.length === 0) {
       const empty = document.createElement("div");
       empty.className = "sess-empty";
       empty.textContent = "empty session";
       sessDetail.appendChild(empty);
+    }
+    // Каждая реплика: текст + плеер своего аудио прямо под ним.
+    for (const t of turns) {
+      const isUser = t.role === "user";
+      const div = document.createElement("div");
+      div.className = "sd-turn " + (isUser ? "user" : "bot");
+
+      const line = document.createElement("div");
+      line.className = "sd-text";
+      line.textContent = (isUser ? "🎤 " : "🔊 ") + (t.text || (isUser ? "(не распознано)" : ""));
+      div.appendChild(line);
+
+      if (t.audio) {
+        const player = document.createElement("audio");
+        player.controls = true;
+        player.preload = "none";
+        player.src = "/audio/" + encodeURIComponent(id) + "/" + encodeURIComponent(t.audio);
+        div.appendChild(player);
+      }
+      sessDetail.appendChild(div);
     }
   } catch (err) {
     sessDetail.innerHTML = '<div class="sess-empty l-err">ошибка: ' + err.message + '</div>';

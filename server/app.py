@@ -76,7 +76,8 @@ def audio(session_id: str, name: str):
         raise HTTPException(status_code=400, detail="bad path")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    return FileResponse(path, media_type="audio/mpeg")
+    media = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
+    return FileResponse(path, media_type=media)
 
 
 @app.get("/sessions")
@@ -94,8 +95,8 @@ def session_detail(sid: str, request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if not _SAFE.match(sid):
         raise HTTPException(status_code=400, detail="bad id")
-    turns = [{"role": r, "text": t} for r, t in sessions.read_history(settings.data_dir, sid)]
-    return JSONResponse({"id": sid, "turns": turns,
+    # turns: [{role, text, audio}] — каждый ход уже несёт имя своего аудиофайла.
+    return JSONResponse({"id": sid, "turns": sessions.read_history(settings.data_dir, sid),
                          "audio": sessions.list_audio(settings.data_dir, sid)})
 
 
