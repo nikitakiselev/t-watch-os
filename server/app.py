@@ -1,4 +1,4 @@
-import asyncio, time
+import asyncio, logging, time
 import re
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -39,7 +39,10 @@ def audio(session_id: str, name: str):
 async def _start_cleanup():
     async def loop():
         while True:
-            s = get_settings()
-            cleanup.cleanup_old(s.data_dir, s.session_ttl, time.time())
+            try:
+                s = get_settings()
+                cleanup.cleanup_old(s.data_dir, s.session_ttl, time.time())
+            except Exception:                       # цикл должен пережить разовый сбой FS
+                logging.getLogger(__name__).exception("session cleanup failed")
             await asyncio.sleep(3600)
     asyncio.create_task(loop())
