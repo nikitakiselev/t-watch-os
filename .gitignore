@@ -9,3 +9,11 @@
 
 # Генерируется при каждой сборке (make пишет UNIX-эпоху хоста)
 watchos/build_time.h
+
+# Локальный конфиг ассистента с API-ключом (реальный ключ — только на машине,
+# не в git; шаблон — ai_server.txt.example). make fs заливает локальный файл,
+# git его не трогает → ключ переживает reset/checkout/pull.
+watchos/data/ai_server.txt
+
+# Артефакты playwright-mcp
+.playwright-mcp/
