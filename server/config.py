@@ -2,6 +2,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Конфиг намеренно на stdlib-dataclass, а не pydantic-settings: держим зависимости
+# и docker-образ минимальными. get_settings() читает env при каждом вызове, поэтому
+# default_factory срабатывает на момент создания Settings (важно для тестов с monkeypatch).
+
 
 @dataclass
 class Settings:
