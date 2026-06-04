@@ -13,6 +13,7 @@
 #include "../../../power.h"
 #include "../../../input.h"
 #include "../../../sound.h"
+#include "../../../listnav.h"
 
 // Управление: тап по стрелке-зоне → шаг; удержание → автоповтор.
 static const int      HIT_R      = 24;    // полуразмер хит-зоны вокруг стрелки, px
@@ -32,6 +33,17 @@ static bool    started = false;
 static int32_t campX = 0, campY = 0;       // последний лагерь-чекпоинт
 static bool    hasCamp = false;            // посещён ли хоть один лагерь
 
+// Сохранить прогресс прямо сейчас (после покупок, прокачки, боёв, лута — чтобы не терять).
+static void gameSaveNow() { if (started) gameSave(px, py, campX, campY, hasCamp); }
+
+// Компактный формат золота/цен: 9999 / 12.3k / 1.2M (чтобы не вылезало за экран).
+static void goldStr(long g, char *o, int n)
+{
+    if (g < 10000)         snprintf(o, n, "%ld", g);
+    else if (g < 1000000)  snprintf(o, n, "%ld.%ldk", g / 1000, (g % 1000) / 100);
+    else                   snprintf(o, n, "%ld.%ldM", g / 1000000, (g % 1000000) / 100000);
+}
+
 static void findStart()
 {
     for (int r = 0; r < 64; r++)
@@ -45,7 +57,8 @@ static void drawHud()
     tft->fillRect(0, 0, SCR_W, 24, COL_BG);
     tft->drawFastHLine(0, 23, SCR_W, COL_FRAME);
     char buf[40];
-    snprintf(buf, sizeof(buf), "HP%d MP%d L%d G%d", gp.hp, gp.mp, gp.level, gp.gold);
+    char gs[12]; goldStr(gp.gold, gs, sizeof(gs));
+    snprintf(buf, sizeof(buf), "HP%d MP%d L%d F%d G%s", gp.hp, gp.mp, gp.level, gFloor, gs);
     tft->setTextDatum(ML_DATUM);
     tft->setTextColor(COL_GREEN, COL_BG);
     tft->drawString(buf, 6, 12, 2);
@@ -56,18 +69,17 @@ static void drawHud()
     for (int i = 0; i < 3; i++) tft->drawFastHLine(mx + 8, my + 6 + i * 5, mw - 16, COL_AMBER);
 }
 
-// Кнопка закрытия [X] в правом-верхнем углу области (rightX — правый край, topY — верх).
-static void drawCloseX(int rightX, int topY)
+// Большая кнопка CLOSE внизу экрана (вместо мелкого углового X — по ней легко попасть).
+static const int CLOSE_BY = 212, CLOSE_BH = 26;
+static void drawCloseBtn()
 {
-    tft->drawRoundRect(rightX - 28, topY, 28, 22, 4, COL_AMBER);
+    tft->fillRoundRect(56, CLOSE_BY, SCR_W - 112, CLOSE_BH, 7, COL_BG);
+    tft->drawRoundRect(56, CLOSE_BY, SCR_W - 112, CLOSE_BH, 7, COL_AMBER);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("X", rightX - 14, topY + 11, 2);
+    tft->drawString("CLOSE", SCR_W / 2, CLOSE_BY + CLOSE_BH / 2, 2);
 }
-static bool hitCloseX(int rightX, int topY, int16_t x, int16_t y)
-{
-    return x >= rightX - 30 && x <= rightX + 2 && y >= topY - 2 && y <= topY + 24;
-}
+static bool hitClose(int16_t y) { return y >= CLOSE_BY - 8; }   // широкая нижняя зона
 
 // Окно награды после победы — поверх экрана боя (скруглённое).
 static void rewardDialog(const Monster &m, int prevLevel)
@@ -84,24 +96,20 @@ static void rewardDialog(const Monster &m, int prevLevel)
 
     char b[28];
     tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "+%d XP   +%d gold", m.xp, m.gold);
+    { char xs[12], gs2[12]; goldStr(m.xp, xs, sizeof(xs)); goldStr(m.gold, gs2, sizeof(gs2));
+      snprintf(b, sizeof(b), "+%s XP   +%s gold", xs, gs2); }
     tft->drawString(b, SCR_W / 2, y0 + 48, 2);
 
     if (lvUp) {
         tft->setTextColor(COL_AMBER, COL_BG);
         snprintf(b, sizeof(b), "LEVEL UP!  Lv%d", gp.level);
         tft->drawString(b, SCR_W / 2, y0 + 72, 2);
+        int lv = gp.level - prevLevel;
         tft->setTextColor(COL_GREEN, COL_BG);
-        snprintf(b, sizeof(b), "+%d points", (gp.level - prevLevel) * STAT_POINTS_PER_LEVEL);
+        snprintf(b, sizeof(b), "+%d stat  +%d skill pts", lv * STAT_POINTS_PER_LEVEL, lv * SKILL_POINTS_PER_LEVEL);
         tft->drawString(b, SCR_W / 2, y0 + 92, 2);
-        if (gLearnedSkill >= 0) {
-            tft->setTextColor(COL_GREEN_HI, COL_BG);
-            snprintf(b, sizeof(b), "Learned: %s", SKILLS[gLearnedSkill].name);
-            tft->drawString(b, SCR_W / 2, y0 + 112, 2);
-        } else {
-            tft->setTextColor(COL_GREEN_DIM, COL_BG);
-            tft->drawString("spend in Character", SCR_W / 2, y0 + 112, 1);
-        }
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        tft->drawString("spend in Character", SCR_W / 2, y0 + 112, 1);
         if (!soundPlayFile("/sfx/levelup.wav")) { soundBeep(700, 60); soundBeep(950, 60); soundBeep(1300, 130); }
     } else {
         tft->setTextColor(COL_GREEN_DIM, COL_BG);
@@ -230,100 +238,311 @@ static void eventTrigger()
     infoDialog(title, msg, col);
 }
 
-// ───── Магазин (торговец) — прокручиваемый список, покупка тапом выделенного ─────
-struct Offer { Item item; int price; };
-static const int SHOP_TOP = 64, SHOP_ROWH = 26, SHOP_VIS = 5;
-
-// Короткое описание бонуса предмета в строку (для магазина/инвентаря).
+// ───── Торговец: экран с вкладками (Weapon/Armor/Potions/Sell), свайп ←/→ ─────
 static void itemBonusStr(const Item &it, char *out, int n)
 {
-    if (it.kind == IT_WEAPON)      snprintf(out, n, "+%d ATK", it.power);
-    else if (it.kind == IT_ARMOR)  snprintf(out, n, "+%d DEF", it.power);
-    else if (it.kind == IT_HP_POTION) snprintf(out, n, "+%d HP", it.power);
-    else                           snprintf(out, n, "+%d MP", it.power);
+    if (it.kind == IT_WEAPON)         snprintf(out, n, "+%d ATK", it.power);
+    else if (it.kind == IT_ARMOR)     snprintf(out, n, "+%d DEF", it.power);
+    else if (it.kind == IT_HP_POTION) snprintf(out, n, "+%d HP",  it.power);
+    else                              snprintf(out, n, "+%d MP",  it.power);
 }
 
-static int shopBuild(int32_t mx, int32_t my, Offer *of)
+// Описание эффекта с величиной для диалога ("fire +5", "leech 10%", ...).
+static void effectDescStr(const Item &it, char *out, int n)
 {
-    long ax = mx < 0 ? -mx : mx, ay = my < 0 ? -my : my, dist = ax > ay ? ax : ay;
+    const char *ef = effectName(it.effect);
+    if (!ef[0]) { out[0] = 0; return; }
+    bool pct = (it.effect == EF_PIERCE || it.effect == EF_CRIT ||
+                it.effect == EF_LIFESTEAL || it.effect == EF_EVASION);
+    snprintf(out, n, "%s +%d%s", ef, it.effMag, pct ? "%" : "");
+}
+
+// Диалог с полными характеристиками предмета + 2 кнопки (verb / Cancel).
+// enabled=false → кнопка действия неактивна (серая, тап игнорируется). Возврат: true = подтверждено.
+static bool itemDetailDialog(const Item &it, int price, const char *verb, bool enabled)
+{
+    const int w = 212, h = 156, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
+    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
+    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(rarityColor(it.rarity), COL_BG);
+    tft->drawString(it.name, SCR_W / 2, y0 + 22, 2);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    tft->drawString(rarityName(it.rarity), SCR_W / 2, y0 + 42, 1);
+
+    char b[40];
+    tft->setTextDatum(ML_DATUM);
+    tft->setTextColor(COL_GREEN, COL_BG);
+    itemBonusStr(it, b, sizeof(b));
+    tft->drawString(b, x0 + 18, y0 + 64, 2);
+    char eff[28]; effectDescStr(it, eff, sizeof(eff));
+    if (eff[0]) { tft->setTextColor(COL_AMBER, COL_BG); tft->drawString(eff, x0 + 18, y0 + 86, 2); }
+
+    tft->setTextDatum(MR_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    char ps[12]; goldStr(price, ps, sizeof(ps));
+    snprintf(b, sizeof(b), "%sg", ps);
+    tft->drawString(b, x0 + w - 18, y0 + 64, 4);
+
+    const int bw = 84, bh = 30, by = y0 + h - bh - 12;
+    const int yx = x0 + 14, cx = x0 + w - 14 - bw;
+    tft->setTextDatum(MC_DATUM);
+    uint16_t vc = enabled ? COL_GREEN : COL_FRAME;
+    tft->drawRoundRect(yx, by, bw, bh, 6, vc);  tft->setTextColor(vc, COL_BG); tft->drawString(verb, yx + bw / 2, by + bh / 2, 2);
+    tft->drawRoundRect(cx, by, bw, bh, 6, COL_AMBER);  tft->setTextColor(COL_AMBER, COL_BG); tft->drawString("Cancel", cx + bw / 2, by + bh / 2, 2);
+
+    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
+    inputBegin();
+    for (;;) {
+        int16_t x, y; InputEvent e = inputPoll(x, y);
+        if (e != EVT_NONE) powerNoteActivity();
+        if (e == EVT_BACK) return false;
+        if (e == EVT_TAP) {
+            if (y >= by && y <= by + bh) {
+                if (enabled && x >= yx && x <= yx + bw) return true;
+                if (x >= cx && x <= cx + bw) return false;
+            }
+            if (x < x0 || x > x0 + w || y < y0 || y > y0 + h) return false;
+        }
+        delay(20);
+    }
+}
+static const char *MTAB[5] = { "WEAPONS", "ARMOR", "POTIONS", "SELL", "UPGRADE" };
+#define MTABS 5
+
+// Стоимость апгрейда экипированного предмета (растёт с силой и глубиной).
+static long upgradeCost(const Item &it, int depth)
+{
+    if (depth < 0) depth = 0;
+    return (long)it.power * 80 * (10 + depth) / 10 + 100;
+}
+
+// Резолв строки списка магазина в предмет + цену. tab: 0-2 покупка, 3 продажа, 4 апгрейд.
+// Возвращает false, если строки нет (пустой слот апгрейда).
+static bool merchResolve(int tab, int v, int depth, Item &it, long &price)
+{
+    if (tab == 4) {
+        if (v == 0 && hasWeapon)      it = equWeapon;
+        else if (v == 1 && hasArmor)  it = equArmor;
+        else return false;
+        price = upgradeCost(it, depth);
+        return true;
+    }
+    if (tab == 3) { it = inv[v]; price = itemSellValue(it); return true; }
+    it = itemScaled(ITEM_DB[v], depth); price = it.price; return true;
+}
+static const int M_TOP = 54, M_ROWH = 32, M_VIS = 4, M_NAVY = 210, M_NAVH = 26;
+
+// Список индексов для вкладки: оружие/броня — окно тиров по глубине; зелья — все;
+// продажа — инвентарь; апгрейд — экипировка.
+static int merchList(int tab, int *out)
+{
     int n = 0;
-    // Зелья (фиксированные).
-    Item hp; hp.kind = IT_HP_POTION; hp.rarity = R_COMMON; hp.count = 1; hp.power = 40; strcpy(hp.name, "HP Potion");
-    of[n].item = hp; of[n].price = 25; n++;
-    Item mp; mp.kind = IT_MP_POTION; mp.rarity = R_COMMON; mp.count = 1; mp.power = 30; strcpy(mp.name, "MP Potion");
-    of[n].item = mp; of[n].price = 20; n++;
-    // Три случайных предмета снаряжения (детерминированы по клетке торговца).
-    for (int g = 0; g < 3; g++) {
-        Item it = itemRandom(chestSeed(mx, my) ^ (0x9999u + g * 0x2D2Bu), dist);
-        of[n].item = it;
-        of[n].price = it.power * 6 + it.rarity * 25 + 20;
-        n++;
+    if (tab == 3) { for (int i = 0; i < invCount; i++) out[n++] = i; return n; }
+    if (tab == 4) { if (hasWeapon) out[n++] = 0; if (hasArmor) out[n++] = 1; return n; }
+    int depth = -gFloor, lo, hi; merchTierWindow(depth, lo, hi);
+    for (int i = 0; i < ITEM_DB_N; i++) {
+        const ItemDef &d = ITEM_DB[i];
+        if (tab == 0 && d.kind == IT_WEAPON && d.minLvl >= lo && d.minLvl <= hi) out[n++] = i;
+        else if (tab == 1 && d.kind == IT_ARMOR && d.minLvl >= lo && d.minLvl <= hi) out[n++] = i;
+        else if (tab == 2 && (d.kind == IT_HP_POTION || d.kind == IT_MP_POTION)) out[n++] = i;
     }
     return n;
 }
 
-static void drawShopList(Offer *of, int n, int sel, int top, const char *fb)
+static void drawMerchant(int tab, int sel, int top, const char *fb)
 {
     tft->fillScreen(COL_BG);
+    char b[44];
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("MERCHANT", SCR_W / 2, 12, 2);
-    drawCloseX(SCR_W - 2, 2);
-    char b[44];
+    snprintf(b, sizeof(b), "SHOP - %s", MTAB[tab]);
+    tft->drawString(b, SCR_W / 2, 12, 2);
     tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "Gold: %d", gp.gold);
-    tft->drawString(b, SCR_W / 2, 36, 2);
+    char gs[12]; goldStr(gp.gold, gs, sizeof(gs));
+    snprintf(b, sizeof(b), "Gold: %s", gs);
+    tft->drawString(b, SCR_W / 2, 32, 1);
 
-    for (int r = 0; r < SHOP_VIS; r++) {
-        int i = top + r; if (i >= n) break;
-        int yy = SHOP_TOP + r * SHOP_ROWH;
-        bool s = (i == sel);
-        if (s) tft->fillRoundRect(4, yy, SCR_W - 8, SHOP_ROWH - 3, 4, COL_GREEN_DIM);
-        bool aff = gp.gold >= of[i].price;
-        char bon[12]; itemBonusStr(of[i].item, bon, sizeof(bon));
-        snprintf(b, sizeof(b), "%s %s", of[i].item.name, bon);
+    int depth = -gFloor;
+    int idx[64]; int n = merchList(tab, idx);
+    if (n == 0) {
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        tft->drawString(tab == 3 ? "nothing to sell" : tab == 4 ? "nothing equipped" : "nothing here",
+                        SCR_W / 2, 110, 2);
+    }
+    for (int r = 0; r < M_VIS; r++) {
+        int li = top + r; if (li >= n) break;
+        int yy = M_TOP + r * M_ROWH;
+        bool s = (li == sel);
+        if (s) tft->fillRoundRect(4, yy, SCR_W - 8, M_ROWH - 3, 4, COL_GREEN_DIM);
+        Item it; long price = 0;
+        merchResolve(tab, idx[li], depth, it, price);
+        bool ok = (tab == 3) || gp.gold >= price;
+        char bon[12]; itemBonusStr(it, bon, sizeof(bon));
+        const char *ef = effectName(it.effect);
+        uint16_t bg = s ? COL_GREEN_DIM : COL_BG;
+        // тусклый цвет сливается с заливкой выделения → на выделенной строке берём контрастный
+        uint16_t dim = s ? COL_GREEN_HI : COL_GREEN_DIM;
+        int rh = M_ROWH - 3;
+        // строка 1: название — крупным шрифтом (font 2)
         tft->setTextDatum(ML_DATUM);
-        tft->setTextColor(aff ? rarityColor(of[i].item.rarity) : COL_GREEN_DIM, s ? COL_GREEN_DIM : COL_BG);
-        tft->drawString(b, 8, yy + (SHOP_ROWH - 3) / 2, 2);
+        tft->setTextColor(ok ? rarityColor(it.rarity) : dim, bg);
+        tft->drawString(it.name, 8, yy + 9, 2);
+        // строка 2: бонус и эффект (для апгрейда — текущий бонус и «+2»)
+        char sub[24];
+        if (tab == 4)   snprintf(sub, sizeof(sub), "%s -> +2", bon);
+        else if (ef[0]) snprintf(sub, sizeof(sub), "%s [%s]", bon, ef);
+        else            snprintf(sub, sizeof(sub), "%s", bon);
+        tft->setTextColor(dim, bg);
+        tft->drawString(sub, 10, yy + 24, 1);
+        // цена справа — крупным (компактно)
+        char ps[12]; goldStr(price, ps, sizeof(ps));
         tft->setTextDatum(MR_DATUM);
-        tft->setTextColor(aff ? COL_AMBER : COL_GREEN_DIM, s ? COL_GREEN_DIM : COL_BG);
-        snprintf(b, sizeof(b), "%dg", of[i].price);
-        tft->drawString(b, SCR_W - 10, yy + (SHOP_ROWH - 3) / 2, 2);
+        tft->setTextColor(ok ? COL_AMBER : dim, bg);
+        snprintf(b, sizeof(b), "%sg", ps);
+        tft->drawString(b, SCR_W - 8, yy + rh / 2, 2);
     }
 
     tft->setTextDatum(MC_DATUM);
-    if (fb && fb[0]) {
-        tft->setTextColor(COL_GREEN_HI, COL_BG);
-        tft->drawString(fb, SCR_W / 2, SCR_H - 10, 1);
-    } else {
-        tft->setTextColor(COL_GREEN_DIM, COL_BG);
-        tft->drawString("swipe: select    tap: buy    X: close", SCR_W / 2, SCR_H - 10, 1);
-    }
+    if (fb && fb[0]) { tft->setTextColor(COL_GREEN_HI, COL_BG); tft->drawString(fb, SCR_W / 2, 188, 1); }
+    else { tft->setTextColor(COL_GREEN_DIM, COL_BG); tft->drawString("swipe < > : tabs", SCR_W / 2, 188, 1); }
+
+    // Нижний нав-бар: [< Prev]  [CLOSE]  [Next >]
+    tft->drawRoundRect(8, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
+    tft->drawRoundRect(SCR_W - 84, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
+    tft->drawRoundRect(94, M_NAVY, 52, M_NAVH, 6, COL_AMBER);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("< Prev", 46, M_NAVY + M_NAVH / 2, 1);
+    tft->drawString("Next >", SCR_W - 46, M_NAVY + M_NAVH / 2, 1);
+    tft->drawString("CLOSE", SCR_W / 2, M_NAVY + M_NAVH / 2, 1);
 }
 
-static void shopDialog(int32_t mx, int32_t my)
+static void merchantScreen()
 {
-    Offer of[8];
-    int n = shopBuild(mx, my, of);
-    int sel = 0, top = 0;
-    char fb[24] = "";
-
+    int tab = 0, sel = 0, top = 0; char fb[24] = "";
     { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
     inputBegin();
-    drawShopList(of, n, sel, top, fb);
-
+    drawMerchant(tab, sel, top, fb);
     for (;;) {
         int16_t x, y; InputEvent e = inputPoll(x, y);
         if (e != EVT_NONE) powerNoteActivity();
         if (e == EVT_BACK) return;
-        if (e == EVT_TAP && hitCloseX(SCR_W - 2, 2, x, y)) return;        // X — выйти
-        if (e == EVT_UP)   { if (sel > 0) sel--; if (sel < top) top = sel; drawShopList(of, n, sel, top, fb); }
-        else if (e == EVT_DOWN) { if (sel < n - 1) sel++; if (sel >= top + SHOP_VIS) top = sel - SHOP_VIS + 1; drawShopList(of, n, sel, top, fb); }
-        else if (e == EVT_TAP) {                       // купить ВЫДЕЛЕННЫЙ пункт
-            if (gp.gold < of[sel].price) { strcpy(fb, "not enough gold"); soundBeep(180, 50); }
-            else if (invAdd(of[sel].item)) { gp.gold -= of[sel].price; strcpy(fb, "bought!"); soundBeep(820, 50); soundBeep(1040, 50); }
-            else { strcpy(fb, "inventory full"); soundBeep(180, 50); }
-            drawShopList(of, n, sel, top, fb);
+        int idx[64]; int n = merchList(tab, idx);
+
+        int depth = -gFloor;
+        if (e == EVT_LEFT || e == EVT_RIGHT) {          // свайп — смена вкладки
+            tab = (tab + (e == EVT_RIGHT ? 1 : MTABS - 1)) % MTABS; sel = top = 0; fb[0] = 0;
+            drawMerchant(tab, sel, top, fb); continue;
+        }
+        if (e == EVT_UP || e == EVT_DOWN) {
+            ListNav l{n, M_VIS, sel, top};
+            if (listNavEvent(l, e)) { sel = l.sel; top = l.top; drawMerchant(tab, sel, top, fb); }
+            continue;
+        }
+        if (e == EVT_TAP) {
+            if (y >= M_NAVY) {                          // нижний нав-бар
+                if (x < 88) { tab = (tab + MTABS - 1) % MTABS; sel = top = 0; fb[0] = 0; drawMerchant(tab, sel, top, fb); }
+                else if (x > SCR_W - 88) { tab = (tab + 1) % MTABS; sel = top = 0; fb[0] = 0; drawMerchant(tab, sel, top, fb); }
+                else return;                            // центр — CLOSE
+                continue;
+            }
+            if (n == 0) continue;
+            Item it; long price = 0;
+            if (!merchResolve(tab, idx[sel], depth, it, price)) continue;
+            if (tab == 3) {                             // продать выделенное
+                if (itemDetailDialog(it, (int)price, "Sell", true)) {
+                    invSell(idx[sel]); snprintf(fb, sizeof(fb), "sold +%ldg", price);
+                    soundBeep(900, 40); soundBeep(700, 40);
+                    if (sel >= invCount) sel = invCount - 1; if (sel < 0) sel = 0; if (sel < top) top = sel;
+                }
+            } else if (tab == 4) {                      // апгрейд экипировки
+                bool can = gp.gold >= price;
+                if (itemDetailDialog(it, (int)price, "Upgrade", can)) {
+                    Item &eq = (idx[sel] == 0) ? equWeapon : equArmor;
+                    eq.power += 2;
+                    if (eq.effect == EF_FIRE || eq.effect == EF_SHOCK || eq.effect == EF_POISON ||
+                        eq.effect == EF_VITALITY || eq.effect == EF_SPIRIT) eq.effMag += 1;
+                    gp.gold -= price; strcpy(fb, "upgraded!");
+                    playerRecalcMax();                  // на случай брони с +HP/+MP
+                    soundBeep(820, 50); soundBeep(1100, 60);
+                }
+            } else {                                    // купить выделенное
+                bool canBuy = gp.gold >= price;
+                if (itemDetailDialog(it, (int)price, "Buy", canBuy)) {
+                    if (invAdd(it)) { gp.gold -= price; strcpy(fb, "bought!"); soundBeep(820, 50); soundBeep(1040, 50); }
+                    else { strcpy(fb, "inventory full"); soundBeep(180, 50); }
+                }
+            }
+            drawMerchant(tab, sel, top, fb);
+            continue;
+        }
+        delay(20);
+    }
+}
+
+// ───── Лестница: выбор этажа (0 верх … -128 низ; глубже — сильнее монстры и награда) ─────
+static const int FLD_W = 220, FLD_H = 158;
+static const int FLD_BW = 84, FLD_BH = 30;
+
+static void drawFloorDialog(int sel, int x0, int y0)
+{
+    tft->fillRoundRect(x0, y0, FLD_W, FLD_H, 12, COL_BG);
+    tft->drawRoundRect(x0, y0, FLD_W, FLD_H, 12, COL_AMBER);
+    char b[32];
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("STAIRS", SCR_W / 2, y0 + 16, 2);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    snprintf(b, sizeof(b), "now: floor %d", gFloor);
+    tft->drawString(b, SCR_W / 2, y0 + 34, 1);
+
+    // стрелки + выбранный этаж
+    tft->setTextColor(COL_GREEN, COL_BG);
+    tft->drawString("<", x0 + 22, y0 + 66, 4);
+    tft->drawString(">", x0 + FLD_W - 22, y0 + 66, 4);
+    tft->setTextColor(COL_GREEN_HI, COL_BG);
+    snprintf(b, sizeof(b), "%d", sel);
+    tft->drawString(b, SCR_W / 2, y0 + 66, 4);
+
+    int depth = -sel; if (depth < 0) depth = 0;
+    tft->setTextColor(depth > -gFloor ? COL_AMBER : COL_GREEN_DIM, COL_BG);
+    snprintf(b, sizeof(b), "monsters Lv ~%d", 1 + depth);
+    tft->drawString(b, SCR_W / 2, y0 + 92, 1);
+
+    const int by = y0 + FLD_H - FLD_BH - 12;
+    const int gx = x0 + 14, cx = x0 + FLD_W - 14 - FLD_BW;
+    tft->drawRoundRect(gx, by, FLD_BW, FLD_BH, 6, COL_GREEN);
+    tft->setTextColor(COL_GREEN, COL_BG); tft->drawString("GO", gx + FLD_BW / 2, by + FLD_BH / 2, 2);
+    tft->drawRoundRect(cx, by, FLD_BW, FLD_BH, 6, COL_AMBER);
+    tft->setTextColor(COL_AMBER, COL_BG); tft->drawString("Cancel", cx + FLD_BW / 2, by + FLD_BH / 2, 2);
+}
+
+// Возвращает выбранный этаж (== gFloor, если отмена).
+static int floorSelectDialog()
+{
+    int sel = gFloor;
+    const int x0 = (SCR_W - FLD_W) / 2, y0 = (SCR_H - FLD_H) / 2;
+    drawFloorDialog(sel, x0, y0);
+    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
+    inputBegin();
+    const int by = y0 + FLD_H - FLD_BH - 12;
+    const int gx = x0 + 14, cx = x0 + FLD_W - 14 - FLD_BW;
+    for (;;) {
+        int16_t x, y; InputEvent e = inputPoll(x, y);
+        if (e != EVT_NONE) powerNoteActivity();
+        if (e == EVT_BACK) return gFloor;
+        if (e == EVT_LEFT)  { if (sel < FLOOR_MAX) { sel++; drawFloorDialog(sel, x0, y0); } continue; }
+        if (e == EVT_RIGHT) { if (sel > FLOOR_MIN) { sel--; drawFloorDialog(sel, x0, y0); } continue; }
+        if (e == EVT_TAP) {
+            if (y >= by && y <= by + FLD_BH) {                       // нижние кнопки
+                if (x >= gx && x <= gx + FLD_BW) return sel;          // GO
+                if (x >= cx && x <= cx + FLD_BW) return gFloor;       // Cancel
+            }
+            if (y >= y0 + 50 && y <= y0 + 86) {                     // ряд стрелок
+                if (x < SCR_W / 2 - 30)      { if (sel < FLOOR_MAX) { sel++; drawFloorDialog(sel, x0, y0); } continue; }
+                if (x > SCR_W / 2 + 30)      { if (sel > FLOOR_MIN) { sel--; drawFloorDialog(sel, x0, y0); } continue; }
+            }
+            if (x < x0 || x > x0 + FLD_W || y < y0 || y > y0 + FLD_H) return gFloor;   // тап вне — отмена
         }
         delay(20);
     }
@@ -334,15 +553,31 @@ static bool step(int dx, int dy)                // true — игрок реал�
     int32_t tx = px + dx, ty = py + dy;
     if (!isWalkable(tx, ty)) return false;
 
+    uint8_t tt0 = tileAt(tx, ty);
+    if (tt0 == TILE_STAIRS) {                       // лестница — выбор этажа, не входим
+        int nf = floorSelectDialog();
+        if (nf != gFloor) {
+            gFloor = nf;
+            floorReset();                           // новый этаж — свежий (монстры/сундуки/алтари заново)
+            gameSave(px, py, campX, campY, hasCamp);
+            char b[24]; snprintf(b, sizeof(b), "floor %d", gFloor);
+            infoDialog("DESCEND", b, COL_GREEN_HI);
+        }
+        kernelRedraw();
+        return false;
+    }
+
     uint8_t tt = tileAt(tx, ty);
-    if (tt == TILE_MERCHANT) {                      // торговец — магазин, не входим в клетку
-        shopDialog(tx, ty);
+    if (tt == TILE_MERCHANT) {                      // торговец — экран с вкладками, не входим
+        merchantScreen();
+        gameSaveNow();                              // зафиксировать покупки/продажи
         kernelRedraw();
         return false;
     }
     if (tt == TILE_ALTAR && !altarUsedAt(tx, ty)) { // алтарь — благословение, не входим
         altarDialog();
         markAltarUsed(tx, ty);
+        gameSaveNow();
         kernelRedraw();
         return false;
     }
@@ -350,6 +585,7 @@ static bool step(int dx, int dy)                // true — игрок реал�
         eventTrigger();
         markEventTriggered(tx, ty);
         px = tx; py = ty;
+        gameSaveNow();
         kernelRedraw();
         return true;
     }
@@ -364,12 +600,12 @@ static bool step(int dx, int dy)                // true — игрок реал�
     }
 
     if (tt == TILE_CHEST && !chestOpenedAt(tx, ty)) {   // открыть сундук
-        long ax = tx < 0 ? -tx : tx, ay = ty < 0 ? -ty : ty, d = ax > ay ? ax : ay;
-        Item it = itemRandom(chestSeed(tx, ty), d);
+        Item it = itemRandom(chestSeed(tx, ty), -gFloor);   // лут масштабируется глубиной этажа
         bool added = invAdd(it);
         soundPlayFile("/sfx/podbor-bombyi.wav");
         lootDialog(it, added);
         markChestOpened(tx, ty);
+        gameSaveNow();                              // зафиксировать лут
         kernelRedraw();
         return false;
     }
@@ -383,6 +619,7 @@ static bool step(int dx, int dy)                // true — игрок реал�
             gp.gold += m.gold;
             monsterMarkCleared(tx, ty);
             rewardDialog(m, prevLevel);          // окно награды поверх боя
+            gameSaveNow();                       // зафиксировать опыт/золото/уровень
         } else if (r == CR_LOSE) {
             deathScreen();
             gp.hp = gp.hpMax;
@@ -406,7 +643,7 @@ static void gameEnter()
         randomSeed(micros());
         if (!gameLoad(px, py, campX, campY, hasCamp)) {   // нет сейва → новая игра
             playerInit(); inventoryInit(); findStart();
-            campX = campY = 0; hasCamp = false;
+            campX = campY = 0; hasCamp = false; gFloor = 0;
         }
         started = true;
     }
@@ -475,11 +712,11 @@ static void gameTick()
     }
 }
 
-// ───── Экран персонажа (модальный, 2 страницы: Info / Stats) ─────
+// ───── Экран персонажа (модальный, 3 страницы: Info / Stats / Skills) ─────
 static int *statPtr(int i) { return i == 0 ? &gp.str : i == 1 ? &gp.dex : &gp.intel; }
 
-// Нижняя панель навигации по страницам + индикатор «N/2».
-static const int CH_NAVY = 206, CH_NAVH = 30, CH_PAGES = 2;
+// Нижняя панель навигации по страницам + индикатор «N/3».
+static const int CH_NAVY = 206, CH_NAVH = 30, CH_PAGES = 3;
 static void drawCharNav(int page)
 {
     tft->drawRoundRect(8, CH_NAVY, 80, CH_NAVH, 6, page > 0 ? COL_AMBER : COL_FRAME);
@@ -489,43 +726,83 @@ static void drawCharNav(int page)
     tft->drawString("< Prev", 48, CH_NAVY + CH_NAVH / 2, 2);
     tft->setTextColor(page < CH_PAGES - 1 ? COL_AMBER : COL_GREEN_DIM, COL_BG);
     tft->drawString("Next >", SCR_W - 48, CH_NAVY + CH_NAVH / 2, 2);
-    char b[8]; snprintf(b, sizeof(b), "%d/%d", page + 1, CH_PAGES);
-    tft->setTextColor(COL_GREEN, COL_BG);
-    tft->drawString(b, SCR_W / 2, CH_NAVY + CH_NAVH / 2, 2);
+    tft->drawRoundRect(92, CH_NAVY, 56, CH_NAVH, 6, COL_AMBER);   // CLOSE по центру
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("CLOSE", SCR_W / 2, CH_NAVY + CH_NAVH / 2, 2);
 }
 
 // ── Страница 0: информация о персонаже ──
+// Краткое описание эффекта экипированного предмета (с учётом мастерства для стихий).
+static void gearEffStr(const Item &it, bool weapon, char *out, int n)
+{
+    out[0] = 0;
+    switch (it.effect) {
+        case EF_FIRE:      snprintf(out, n, " Fire+%d",  it.effMag * (100 + playerMasteryPct(DMG_FIRE))  / 100); break;
+        case EF_SHOCK:     snprintf(out, n, " Light+%d", it.effMag * (100 + playerMasteryPct(DMG_LIGHT)) / 100); break;
+        case EF_POISON:    snprintf(out, n, " Psn%d/t",  it.effMag); break;
+        case EF_PIERCE:    snprintf(out, n, " Pierce%d%%", it.effMag); break;
+        case EF_CRIT:      snprintf(out, n, " Crit+%d%%",  it.effMag); break;
+        case EF_LIFESTEAL: snprintf(out, n, " Leech%d%%",  it.effMag); break;
+        case EF_VITALITY:  snprintf(out, n, " +%dHP",      it.effMag); break;
+        case EF_SPIRIT:    snprintf(out, n, " +%dMP",      it.effMag); break;
+        case EF_EVASION:   snprintf(out, n, " +%d%%dodge", it.effMag); break;
+        default: break;
+    }
+    (void)weapon;
+}
+
 static void drawCharInfo()
 {
-    char b[44];
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(COL_GREEN_DIM, COL_BG);
-    tft->drawString("- INFO -", SCR_W / 2, 32, 2);
+    char b[48], eff[20];
+    int baseAtk = gp.str + 5, wpn = playerAtkBonus();
+    int baseDef = gp.dex / 2, arm = playerDefBonus();
+    int critPct  = gp.dex + ((hasWeapon && equWeapon.effect == EF_CRIT)    ? equWeapon.effMag : 0);
+    int dodgePct = gp.dex + ((hasArmor  && equArmor.effect  == EF_EVASION) ? equArmor.effMag  : 0);
+    if (critPct  > 75) critPct  = 75;          // потолок (см. dmgCalc MAX_CRIT/MAX_DODGE)
+    if (dodgePct > 75) dodgePct = 75;
 
     tft->setTextDatum(ML_DATUM);
     tft->setTextColor(COL_GREEN, COL_BG);
     snprintf(b, sizeof(b), "Lv %d   XP %ld/%ld", gp.level, gp.xp, xpForNext(gp.level));
-    tft->drawString(b, 12, 54, 2);
-    snprintf(b, sizeof(b), "HP %d/%d", gp.hp, gp.hpMax);
-    tft->drawString(b, 12, 76, 2);
-    snprintf(b, sizeof(b), "MP %d/%d", gp.mp, gp.mpMax);
-    tft->drawString(b, 12, 96, 2);
+    tft->drawString(b, 10, 36, 2);
+    snprintf(b, sizeof(b), "HP %d/%d   MP %d/%d", gp.hp, gp.hpMax, gp.mp, gp.mpMax);
+    tft->drawString(b, 10, 58, 2);
 
-    int baseAtk = gp.str + 5,  wpn = playerAtkBonus();
-    int baseDef = gp.dex / 2,  arm = playerDefBonus();
-    tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "ATK %d", baseAtk + wpn); tft->drawString(b, 12, 122, 2);
+    snprintf(b, sizeof(b), "ATK %d", baseAtk + wpn); tft->drawString(b, 10, 80, 2);
     tft->setTextColor(COL_GREEN_DIM, COL_BG);
-    snprintf(b, sizeof(b), "= %d base + %d weapon", baseAtk, wpn); tft->drawString(b, 80, 124, 1);
-
+    snprintf(b, sizeof(b), "%d base +%d wpn", baseAtk, wpn); tft->drawString(b, 96, 82, 1);
     tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "DEF %d", baseDef + arm); tft->drawString(b, 12, 144, 2);
+    snprintf(b, sizeof(b), "DEF %d", baseDef + arm); tft->drawString(b, 10, 100, 2);
     tft->setTextColor(COL_GREEN_DIM, COL_BG);
-    snprintf(b, sizeof(b), "= %d base + %d armor", baseDef, arm); tft->drawString(b, 80, 146, 1);
+    snprintf(b, sizeof(b), "%d base +%d arm", baseDef, arm); tft->drawString(b, 96, 102, 1);
 
     tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "Crit %d%%   Dodge %d%%", gp.dex, gp.dex); tft->drawString(b, 12, 168, 2);
-    snprintf(b, sizeof(b), "Gold %d", gp.gold); tft->drawString(b, 12, 188, 2);
+    snprintf(b, sizeof(b), "Crit %d%%   Dodge %d%%", critPct, dodgePct);
+    tft->drawString(b, 10, 122, 2);
+
+    // ── Экипировка (с эффектами/стихийным уроном) ──
+    tft->setTextColor(COL_AMBER, COL_BG);
+    if (hasWeapon) { gearEffStr(equWeapon, true, eff, sizeof(eff));
+                     snprintf(b, sizeof(b), "W: %s +%dA%s", equWeapon.name, equWeapon.power, eff); }
+    else           snprintf(b, sizeof(b), "W: none");
+    tft->drawString(b, 10, 146, 1);
+    if (hasArmor)  { gearEffStr(equArmor, false, eff, sizeof(eff));
+                     snprintf(b, sizeof(b), "A: %s +%dD%s", equArmor.name, equArmor.power, eff); }
+    else           snprintf(b, sizeof(b), "A: none");
+    tft->drawString(b, 10, 160, 1);
+
+    // ── Пассивы (+% к урону стихией; вампиризм — % HP от физ. урона) ──
+    tft->setTextColor(COL_GREEN_HI, COL_BG);
+    snprintf(b, sizeof(b), "Mast F+%d%% S+%d%% V+%d%%  Vamp+%d%%",
+             playerMasteryPct(DMG_FIRE), playerMasteryPct(DMG_LIGHT),
+             playerMasteryPct(DMG_POISON), playerLifestealPct());
+    tft->drawString(b, 10, 176, 1);
+
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    char gs[12]; goldStr(gp.gold, gs, sizeof(gs));
+    snprintf(b, sizeof(b), "Gold %s   Floor %d   pts S%d K%d",
+             gs, gFloor, gp.statPoints, gp.skillPoints);
+    tft->drawString(b, 10, 190, 1);
 }
 
 // ── Страница 1: прокачка статов (крупные кнопки [+]) ──
@@ -568,31 +845,198 @@ static void drawCharStats()
     }
 }
 
+// ── Страница 2: навыки (прокручиваемый список) ──
+static const int SKP_TOP = 50, SKP_ROWH = 38, SKP_VIS = 4;
+static int chSkTop = 0, chSkSel = 0;
+
+// Геометрия инфо-окна навыка.
+static const int SKI_W = 216, SKI_H = 160;
+static const int SKI_BW = 96, SKI_BH = 30;
+
+static void drawSkillInfo(int id)
+{
+    const SkillDef &s = SKILLS[id];
+    int rank = skillRank(id);
+    int dr   = rank > 0 ? rank : 1;            // если не изучен — превью с R1
+    int pw   = skillPowerAt(id, dr);
+    int dur  = skillDurationAt(id, dr);
+    bool passive = skillPassive(id);
+
+    char l1[40] = "", l2[40] = "", l3[40] = "";
+    if (passive) {
+        if (id == SK_M_VAMP) {
+            snprintf(l1, sizeof(l1), "Passive - vampirism");
+            snprintf(l2, sizeof(l2), "+%d%% HP from phys dmg", rank);
+        } else {
+            snprintf(l1, sizeof(l1), "Passive - %s mastery", dmgTypeName(s.dmgType));
+            snprintf(l2, sizeof(l2), "+%d%% %s damage", rank, dmgTypeName(s.dmgType));
+        }
+    } else {
+        switch (s.kind) {
+            case SKK_DAMAGE:
+                if (id == SK_POWERSTRIKE) {                  // усиленный удар оружием
+                    int atkv = gp.str + 5 + playerAtkBonus();
+                    int mult = 150 + (dr - 1) * 6;
+                    snprintf(l1, sizeof(l1), "Active - weapon strike");
+                    snprintf(l2, sizeof(l2), "~%d dmg (x%d.%02d ATK)", atkv * mult / 100, mult / 100, mult % 100);
+                } else {
+                    snprintf(l1, sizeof(l1), "Active - %s damage", dmgTypeName(s.dmgType));
+                    snprintf(l2, sizeof(l2), "~%d dmg%s", pw, s.ignoreDef ? ", ignores armor" : "");
+                }
+                break;
+            case SKK_DOT:
+                snprintf(l1, sizeof(l1), "Active - %s over time", dmgTypeName(s.dmgType));
+                snprintf(l2, sizeof(l2), "%d/turn x%d turns", pw, dur);
+                break;
+            case SKK_DRAIN:
+                snprintf(l1, sizeof(l1), "Active - %s lifesteal", dmgTypeName(s.dmgType));
+                snprintf(l2, sizeof(l2), "~%d dmg, heal 50%%", pw);
+                break;
+            case SKK_HEAL:
+                snprintf(l1, sizeof(l1), "Active - heal");
+                snprintf(l2, sizeof(l2), "+%d HP", pw);
+                break;
+            case SKK_HOT:
+                snprintf(l1, sizeof(l1), "Active - regen");
+                snprintf(l2, sizeof(l2), "+%d HP/turn x%d", pw, dur);
+                break;
+            case SKK_SHIELD:
+                snprintf(l1, sizeof(l1), "Active - shield");
+                snprintf(l2, sizeof(l2), "incoming dmg /2, %d turns", dur);
+                break;
+        }
+        snprintf(l3, sizeof(l3), "Cost: %d MP", s.cost);
+    }
+
+    const int x0 = (SCR_W - SKI_W) / 2, y0 = (SCR_H - SKI_H) / 2;
+    tft->fillRoundRect(x0, y0, SKI_W, SKI_H, 12, COL_BG);
+    tft->drawRoundRect(x0, y0, SKI_W, SKI_H, 12, passive ? COL_AMBER : COL_GREEN);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(passive ? COL_AMBER : COL_GREEN_HI, COL_BG);
+    tft->drawString(s.name, SCR_W / 2, y0 + 20, 4);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    tft->drawString(l1, SCR_W / 2, y0 + 44, 2);
+    tft->setTextColor(COL_GREEN, COL_BG);
+    tft->drawString(l2, SCR_W / 2, y0 + 64, 2);
+    if (l3[0]) { tft->setTextColor(COL_AMBER, COL_BG); tft->drawString(l3, SCR_W / 2, y0 + 84, 2); }
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    char rl[28]; snprintf(rl, sizeof(rl), "Rank %d / %d   (pts %d)", rank, SKILL_MAX_RANK, gp.skillPoints);
+    tft->drawString(rl, SCR_W / 2, y0 + 104, 2);
+
+    // Кнопки: [+1 Rank] (если есть очки и не максимум) и [Close].
+    bool canUp = gp.skillPoints > 0 && rank < SKILL_MAX_RANK;
+    const int by = y0 + SKI_H - SKI_BH - 12;
+    const int ux = x0 + 14, cx = x0 + SKI_W - 14 - SKI_BW;
+    uint16_t uc = canUp ? COL_GREEN : COL_FRAME;
+    tft->drawRoundRect(ux, by, SKI_BW, SKI_BH, 6, uc);
+    tft->setTextColor(canUp ? COL_GREEN : COL_GREEN_DIM, COL_BG);
+    tft->drawString(canUp ? "+1 Rank" : "max", ux + SKI_BW / 2, by + SKI_BH / 2, 2);
+    tft->drawRoundRect(cx, by, SKI_BW, SKI_BH, 6, COL_AMBER);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("Close", cx + SKI_BW / 2, by + SKI_BH / 2, 2);
+}
+
+// Инфо-окно навыка с прокачкой. Возвращает true, если ранг был изменён (нужна перерисовка списка).
+static bool skillInfoDialog(int id)
+{
+    bool changed = false;
+    const int x0 = (SCR_W - SKI_W) / 2, y0 = (SCR_H - SKI_H) / 2;
+    const int by = y0 + SKI_H - SKI_BH - 12;
+    const int ux = x0 + 14, cx = x0 + SKI_W - 14 - SKI_BW;
+    drawSkillInfo(id);
+    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
+    inputBegin();
+    for (;;) {
+        int16_t x, y; InputEvent e = inputPoll(x, y);
+        if (e != EVT_NONE) powerNoteActivity();
+        if (e == EVT_BACK) return changed;
+        if (e == EVT_TAP) {
+            if (y >= by && y <= by + SKI_BH) {
+                if (x >= cx && x <= cx + SKI_BW) return changed;       // Close
+                if (x >= ux && x <= ux + SKI_BW &&                     // +1 Rank
+                    gp.skillPoints > 0 && skillRank(id) < SKILL_MAX_RANK) {
+                    gp.skillRank[id]++; gp.skillPoints--; changed = true;
+                    soundBeep(900, 30);
+                    drawSkillInfo(id);
+                    continue;
+                }
+            }
+            if (x < x0 || x > x0 + SKI_W || y < y0 || y > y0 + SKI_H) return changed;  // тап вне — закрыть
+        }
+        delay(20);
+    }
+}
+
+static void drawCharSkills()
+{
+    char b[40];
+    tft->setTextDatum(MC_DATUM);
+    if (gp.skillPoints > 0) {
+        tft->setTextColor(COL_AMBER, COL_BG);
+        snprintf(b, sizeof(b), "Skill pts: %d", gp.skillPoints);
+    } else {
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        snprintf(b, sizeof(b), "no skill points");
+    }
+    tft->drawString(b, SCR_W / 2, 32, 2);
+
+    for (int r = 0; r < SKP_VIS; r++) {
+        int li = chSkTop + r; if (li >= SK_COUNT) break;
+        const SkillDef &s = SKILLS[li];
+        int rank = skillRank(li);
+        int yy = SKP_TOP + r * SKP_ROWH;
+        bool sel = (li == chSkSel);
+        if (sel) tft->fillRoundRect(4, yy, SCR_W - 8, SKP_ROWH - 3, 4, COL_GREEN_DIM);
+        uint16_t bg = sel ? COL_GREEN_DIM : COL_BG;
+        bool passive = (s.kind == SKK_PASSIVE);
+
+        tft->setTextDatum(ML_DATUM);
+        uint16_t nc = rank > 0 ? (passive ? COL_AMBER : COL_GREEN) : (sel ? COL_GREEN_HI : COL_GREEN_DIM);
+        tft->setTextColor(nc, bg);
+        tft->drawString(s.name, 10, yy + (SKP_ROWH - 3) / 2, 2);
+
+        tft->setTextDatum(MR_DATUM);
+        tft->setTextColor(sel ? COL_GREEN_HI : COL_GREEN_DIM, bg);
+        if (passive) snprintf(b, sizeof(b), "+%d%%", rank);    // мастерство: +1%/ранг
+        else         snprintf(b, sizeof(b), "R%d", rank);
+        tft->drawString(b, SCR_W - 12, yy + (SKP_ROWH - 3) / 2, 2);
+    }
+}
+
 static void drawCharacterPage(int page)
 {
     tft->fillScreen(COL_BG);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("CHARACTER", SCR_W / 2, 12, 2);
-    drawCloseX(SCR_W - 2, 2);
-    if (page == 0) drawCharInfo(); else drawCharStats();
+    char t[20]; snprintf(t, sizeof(t), "CHARACTER  %d/%d", page + 1, CH_PAGES);
+    tft->drawString(t, SCR_W / 2, 12, 2);
+    if (page == 0) drawCharInfo(); else if (page == 1) drawCharStats(); else drawCharSkills();
     drawCharNav(page);
 }
 
 static void characterScreen()
 {
     int page = 0;
+    chSkTop = chSkSel = 0;
     drawCharacterPage(page);
     for (;;) {
         int16_t x, y; InputEvent e = inputPoll(x, y);
         if (e != EVT_NONE) powerNoteActivity();
         if (e == EVT_BACK) return;
+
+        if (page == 2 && (e == EVT_UP || e == EVT_DOWN)) {      // прокрутка списка навыков
+            ListNav l{SK_COUNT, SKP_VIS, chSkSel, chSkTop};
+            if (listNavEvent(l, e)) { chSkSel = l.sel; chSkTop = l.top; drawCharacterPage(page); }
+            continue;
+        }
         if (e != EVT_TAP) { delay(20); continue; }
 
-        if (hitCloseX(SCR_W - 2, 2, x, y)) return;               // X — закрыть
-        // Свайпы тоже листают страницы.
-        if (y >= CH_NAVY && x < 90) { if (page > 0) { page--; drawCharacterPage(page); } continue; }
-        if (y >= CH_NAVY && x > SCR_W - 90) { if (page < CH_PAGES - 1) { page++; drawCharacterPage(page); } continue; }
+        if (y >= CH_NAVY) {                                      // нижний нав-бар
+            if (x < 90) { if (page > 0) { page--; drawCharacterPage(page); } }
+            else if (x > SCR_W - 90) { if (page < CH_PAGES - 1) { page++; drawCharacterPage(page); } }
+            else return;                                         // центр = CLOSE
+            continue;
+        }
 
         if (page == 1 && gp.statPoints > 0 && x >= ST_PLUSX && x <= ST_PLUSX + ST_PLUSW) {
             for (int i = 0; i < 3; i++) {
@@ -605,13 +1049,16 @@ static void characterScreen()
                 }
             }
         }
+        else if (page == 2) {       // тап активирует ВЫДЕЛЕННЫЙ навык (свайп — выбор)
+            skillInfoDialog(chSkSel);
+            drawCharacterPage(page);
+        }
         delay(20);
     }
 }
 
 // ───── Инвентарь (модальный) ─────
 static const int INV_TOP = 58, INV_ROWH = 22, INV_VIS = 5;
-static const int INV_SELL_X = 60, INV_SELL_Y = 176, INV_SELL_W = 120, INV_SELL_H = 26;
 
 static void drawInv(int sel, int top, const char *fb = nullptr)
 {
@@ -619,7 +1066,6 @@ static void drawInv(int sel, int top, const char *fb = nullptr)
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
     tft->drawString("INVENTORY", SCR_W / 2, 12, 2);
-    drawCloseX(SCR_W - 2, 2);
 
     char b[44];
     tft->setTextDatum(ML_DATUM);
@@ -633,6 +1079,7 @@ static void drawInv(int sel, int top, const char *fb = nullptr)
         tft->setTextDatum(MC_DATUM);
         tft->setTextColor(COL_GREEN_DIM, COL_BG);
         tft->drawString("empty", SCR_W / 2, 120, 4);
+        drawCloseBtn();
         return;
     }
     for (int r = 0; r < INV_VIS; r++) {
@@ -649,23 +1096,18 @@ static void drawInv(int sel, int top, const char *fb = nullptr)
         tft->setTextDatum(ML_DATUM);
         tft->setTextColor(rarityColor(inv[i].rarity), s ? COL_GREEN_DIM : COL_BG);
         tft->drawString(b, 8, yy + (INV_ROWH - 3) / 2, 2);
+        // эффект (если есть) — мелкой меткой справа
+        const char *ef = effectName(inv[i].effect);
+        if (ef[0]) { tft->setTextDatum(MR_DATUM); tft->setTextColor(COL_AMBER, s ? COL_GREEN_DIM : COL_BG);
+                     tft->drawString(ef, SCR_W - 8, yy + (INV_ROWH - 3) / 2, 1); }
     }
-    // Кнопка продажи выделенного предмета.
-    int sp = itemSellValue(inv[sel]);
-    tft->drawRoundRect(INV_SELL_X, INV_SELL_Y, INV_SELL_W, INV_SELL_H, 6, COL_AMBER);
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    snprintf(b, sizeof(b), "SELL  +%dg", sp);
-    tft->drawString(b, SCR_W / 2, INV_SELL_Y + INV_SELL_H / 2, 2);
 
     tft->setTextDatum(MC_DATUM);
     if (fb) {
         tft->setTextColor(COL_GREEN_HI, COL_BG);
-        tft->drawString(fb, SCR_W / 2, SCR_H - 10, 1);
-    } else {
-        tft->setTextColor(COL_GREEN_DIM, COL_BG);
-        tft->drawString("swipe:select  tap:use  SELL  X:close", SCR_W / 2, SCR_H - 10, 1);
+        tft->drawString(fb, SCR_W / 2, 206, 1);
     }
+    drawCloseBtn();
 }
 
 static void inventoryScreen()
@@ -677,28 +1119,22 @@ static void inventoryScreen()
         int16_t x, y; InputEvent e = inputPoll(x, y);
         if (e != EVT_NONE) powerNoteActivity();
         if (e == EVT_BACK) return;
-        if (e == EVT_TAP && hitCloseX(SCR_W - 2, 2, x, y)) return;   // кнопка X
+        if (e == EVT_TAP && hitClose(y)) return;   // нижняя кнопка CLOSE
         if (invCount == 0) { if (e == EVT_TAP) return; delay(20); continue; }
 
-        if (e == EVT_UP)   { if (sel > 0) sel--; if (sel < top) top = sel; fb[0] = 0; drawInv(sel, top); }
-        else if (e == EVT_DOWN) { if (sel < invCount - 1) sel++; if (sel >= top + INV_VIS) top = sel - INV_VIS + 1; fb[0] = 0; drawInv(sel, top); }
-        else if (e == EVT_TAP) {
-            bool sellTap = (x >= INV_SELL_X && x <= INV_SELL_X + INV_SELL_W &&
-                            y >= INV_SELL_Y && y <= INV_SELL_Y + INV_SELL_H);
-            if (sellTap) {                          // продать выделенный
-                int g = invSell(sel);
-                snprintf(fb, sizeof(fb), "sold +%dg", g);
-                soundBeep(900, 40); soundBeep(700, 40);
-            } else {                                // применить ВЫДЕЛЕННЫЙ пункт
-                Item &it = inv[sel];
-                if (itemIsGear(it)) { invEquip(sel); fb[0] = 0; }
-                else if (!invUse(sel)) strcpy(fb, it.kind == IT_HP_POTION ? "HP already full" : "MP already full");
-                else fb[0] = 0;
-            }
+        if (e == EVT_UP || e == EVT_DOWN) {
+            ListNav l{invCount, INV_VIS, sel, top};
+            if (listNavEvent(l, e)) { sel = l.sel; top = l.top; fb[0] = 0; drawInv(sel, top); }
+        }
+        else if (e == EVT_TAP) {                    // применить ВЫДЕЛЕННЫЙ предмет (надеть/выпить)
+            Item &it = inv[sel];
+            if (itemIsGear(it)) { invEquip(sel); fb[0] = 0; }
+            else if (!invUse(sel)) strcpy(fb, it.kind == IT_HP_POTION ? "HP already full" : "MP already full");
+            else fb[0] = 0;
             if (sel >= invCount) sel = invCount - 1;
             if (sel < 0) sel = 0;
             if (sel < top) top = sel;
-            if (invCount == 0) return;              // всё продано/использовано — выходим
+            if (invCount == 0) return;              // всё использовано — выходим
             drawInv(sel, top, fb[0] ? fb : nullptr);
         }
         delay(20);
@@ -706,37 +1142,40 @@ static void inventoryScreen()
 }
 
 // ───── Меню игры (по кнопке ≡ сверху справа) ─────
-static void gameMenu()
+static const int GM_W = 162, GM_H = 150, GM_X0 = (SCR_W - 162) / 2, GM_Y0 = 44;
+static void drawGameMenu(int sel)
 {
-    const int w = 162, h = 150, x0 = (SCR_W - w) / 2, y0 = 44;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_GREEN);
+    tft->fillRoundRect(GM_X0, GM_Y0, GM_W, GM_H, 12, COL_BG);
+    tft->drawRoundRect(GM_X0, GM_Y0, GM_W, GM_H, 12, COL_GREEN);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("MENU", SCR_W / 2, y0 + 16, 2);
-    drawCloseX(x0 + w - 4, y0 + 4);
+    tft->drawString("MENU", SCR_W / 2, GM_Y0 + 16, 2);
 
     const char *items[3] = { "Inventory", "Character", "Exit" };
-    const int bx = x0 + 14, bw = w - 28, bh = 30, gap = 6, by0 = y0 + 34;
+    const int bx = GM_X0 + 14, bw = GM_W - 28, bh = 30, gap = 6, by0 = GM_Y0 + 34;
     for (int i = 0; i < 3; i++) {
         int by = by0 + i * (bh + gap);
-        tft->drawRoundRect(bx, by, bw, bh, 6, COL_FRAME);
-        tft->setTextColor(i == 2 ? COL_AMBER : COL_GREEN, COL_BG);
+        if (i == sel) tft->fillRoundRect(bx, by, bw, bh, 6, COL_GREEN_DIM);
+        tft->drawRoundRect(bx, by, bw, bh, 6, i == sel ? COL_AMBER : COL_FRAME);
+        tft->setTextColor(i == 2 ? COL_AMBER : COL_GREEN, i == sel ? COL_GREEN_DIM : COL_BG);
         tft->drawString(items[i], SCR_W / 2, by + bh / 2, 2);
     }
+}
 
+static void gameMenu()
+{
+    ListNav l{3, 0, 0, 0};                       // свайп ↑↓ — выбор, тап — выбрать активный
+    drawGameMenu(l.sel);
     for (;;) {
         int16_t x, y; InputEvent e = inputPoll(x, y);
         if (e != EVT_NONE) powerNoteActivity();
         if (e == EVT_BACK) { kernelRedraw(); return; }
+        if (e == EVT_UP || e == EVT_DOWN) { if (listNavEvent(l, e)) drawGameMenu(l.sel); continue; }
         if (e == EVT_TAP) {
-            if (x >= bx && x <= bx + bw && y >= by0 && y < by0 + 3 * (bh + gap)) {
-                int i = (y - by0) / (bh + gap);
-                if (i == 0) { inventoryScreen(); kernelRedraw(); return; }
-                if (i == 1) { characterScreen(); kernelRedraw(); return; }
-                if (i == 2) { kernelBack(); return; }
-            }
-            if (x < x0 || x > x0 + w || y < y0 || y > y0 + h) { kernelRedraw(); return; }
+            if (x < GM_X0 || x > GM_X0 + GM_W || y < GM_Y0 || y > GM_Y0 + GM_H) { kernelRedraw(); return; }  // тап мимо — закрыть
+            if (l.sel == 0) { inventoryScreen(); gameSaveNow(); kernelRedraw(); return; }   // экипировка/зелья
+            if (l.sel == 1) { characterScreen(); gameSaveNow(); kernelRedraw(); return; }   // очки статов/навыков
+            kernelBack(); return;                // Exit
         }
         delay(20);
     }

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Превью подземелья</title>
+<style>
+ body{background:#0f0c14;color:#cdc6d6;font-family:system-ui,sans-serif;margin:0;padding:14px}
+ canvas{image-rendering:pixelated}
+ #cv{border:1px solid #3a3047;cursor:crosshair}
+ .bar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+ button,input{background:#221b2b;color:#cdc6d6;border:1px solid #4a4057;border-radius:5px;padding:5px 9px}
+ #info{font-family:monospace;font-size:13px;color:#e0a040;min-width:320px}
+ #wrap{display:flex;gap:14px;align-items:flex-start}
+ #panel{width:300px;flex:none}
+ .cs{display:flex;align-items:center;gap:8px;margin:3px 0;padding:4px 8px;border-radius:6px;font-family:monospace;font-size:13px}
+ .cs input{width:56px;text-align:center}
+ .cs.edge{background:#1c2a1c}.cs.outer{background:#16283a}.cs.inner{background:#3a1a1a}
+ .cs.sel{outline:2px solid #fff}
+ .grp{font-size:12px;color:#8a7f99;margin:10px 0 2px}
+ #sheetwrap{position:relative;margin-top:8px}
+ #sheetlabels{position:absolute;left:0;top:0;pointer-events:none}
+</style></head><body>
+<div class="bar">
+ <button onclick="move(0,-6)">↑</button><button onclick="move(0,6)">↓</button>
+ <button onclick="move(-6,0)">←</button><button onclick="move(6,0)">→</button>
+ <button onclick="ox=-3;oy=-3;draw()">⌂ старт-камп</button>
+ масштаб <input id="sc" type="number" value="26" min="8" max="48" style="width:50px" onchange="draw()">
+ <button onclick="exportCode()">экспорт</button>
+ <span id="info">наведи на клетку…</span>
+</div>
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10;align-items:center;justify-content:center">
+  <div style="background:#221b2b;border:1px solid #4a4057;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px">
+    <b>Маппинг случай → тайл</b>
+    <textarea id="exp" style="width:520px;height:300px;font-family:monospace;font-size:13px;background:#16121c;color:#cdc6d6;border:1px solid #4a4057;border-radius:6px"></textarea>
+    <div style="display:flex;gap:8px">
+      <button onclick="document.getElementById('exp').select();document.execCommand('copy')">скопировать</button>
+      <button onclick="document.getElementById('modal').style.display='none'">закрыть</button>
+    </div>
+  </div>
+</div>
+<div id="wrap">
+ <canvas id="cv"></canvas>
+ <div id="panel">
+   <div class="grp">Тайл для каждого случая стены (меняй число — рендер обновляется):</div>
+   <div id="cases"></div>
+   <div class="grp">Тайлсет (клик — вписать индекс в выбранный случай):</div>
+   <div id="sheetwrap"><canvas id="sheet"></canvas><canvas id="sheetlabels"></canvas></div>
+ </div>
+</div>
+<script>
+const TS=16,COLS=10,C=12,MID=6,SEED=0x1337C0DE>>>0;
+const WALL=0,FLOOR=1,STAIRS=2,CHEST=3,MERCH=4,ALTAR=5,EVENT=6,CAMP=7;
+const TNAME={[STAIRS]:'STAIRS',[CHEST]:'CHEST',[MERCH]:'MERCHANT',[ALTAR]:'ALTAR',[EVENT]:'EVENT',[CAMP]:'CAMP'};
+const VOID='#251316';
+const FLOORS=[11,12,13,14,21,22,23,24,31,32,33,34];
+const img=new Image(); img.src='tileset.png';
+let ox=-3,oy=-3,hover=null,selCase=null;
+
+// случай → тайл (это и пойдёт в код устройства). Дефолты = текущий wallTileAt.
+const DEF={TOP:1,BOTTOM:41,LEFT:10,RIGHT:15,OUTER_TL:0,OUTER_TR:5,OUTER_BL:40,OUTER_BR:45,INNER_TL:0,INNER_TR:5,INNER_BL:40,INNER_BR:45};
+let caseTile=Object.assign({},DEF,JSON.parse(localStorage.getItem('caseTile')||'{}'));
+function saveCT(){localStorage.setItem('caseTile',JSON.stringify(caseTile));}
+const CASES=[['edge','TOP','пол снизу'],['edge','BOTTOM','пол сверху'],['edge','LEFT','пол справа'],['edge','RIGHT','пол слева'],
+ ['outer','OUTER_TL','диаг ЮВ'],['outer','OUTER_TR','диаг ЮЗ'],['outer','OUTER_BL','диаг СВ'],['outer','OUTER_BR','диаг СЗ'],
+ ['inner','INNER_TL','пол S+E'],['inner','INNER_TR','пол S+W'],['inner','INNER_BL','пол N+E'],['inner','INNER_BR','пол N+W']];
+
+function hash2(x,y,seed){let h=seed>>>0;
+  h=(h^(Math.imul(x>>>0,0x9E3779B1)>>>0))>>>0;h=Math.imul((h^(h>>>16))>>>0,0x85EBCA6B)>>>0;
+  h=(h^(Math.imul(y>>>0,0xC2B2AE35)>>>0))>>>0;h=Math.imul((h^(h>>>13))>>>0,0x27D4EB2F)>>>0;
+  return (h^(h>>>16))>>>0;}
+const fd=(a,b)=>Math.floor(a/b);
+function isCamp(cx,cy){if(cx===0&&cy===0)return true;return hash2(cx,cy,(SEED^0xCA77F)>>>0)%13===0;}
+function campTile(lx,ly){const b=(lx===0||lx===C-1||ly===0||ly===C-1);
+  if(b){const d=(lx===MID&&(ly===0||ly===C-1))||(ly===MID&&(lx===0||lx===C-1));return d?FLOOR:WALL;}
+  if(lx===3&&ly===3)return CAMP;if(lx===8&&ly===3)return MERCH;if(lx===3&&ly===8)return ALTAR;return FLOOR;}
+function tileAt(x,y){const cx=fd(x,C),cy=fd(y,C),lx=x-cx*C,ly=y-cy*C;
+  if(isCamp(cx,cy))return campTile(lx,ly);
+  const h=hash2(cx,cy,SEED);
+  const rw=3+(h%4),rh=3+((h>>>3)%4);
+  const rx=1+((h>>>6)%(C-rw-1)),ry=1+((h>>>10)%(C-rh-1));
+  const rcx=rx+(rw>>1),rcy=ry+(rh>>1);
+  const inR=(lx>=rx&&lx<rx+rw&&ly>=ry&&ly<ry+rh);
+  const lo=rcx<MID?rcx:MID,hi=rcx<MID?MID:rcx;
+  const corr=(lx===MID)||(ly===MID)||(ly===rcy&&lx>=lo&&lx<=hi);
+  if(!(inR||corr))return WALL;
+  if(lx===rcx&&ly===rcy){const f=(h>>>22)%12;if(f<=1)return CHEST;if(f===2)return MERCH;if(f===3)return ALTAR;}
+  if(lx===rx&&ly===ry&&((h>>>20)%6)===0)return STAIRS;
+  if(hash2(x,y,(SEED^0x5A17E5)>>>0)%48===0)return EVENT;
+  return FLOOR;}
+const isWalk=(x,y)=>tileAt(x,y)!==WALL;
+// возвращает ИМЯ случая (тайл берём из caseTile)
+function wallCase(x,y){const s=isWalk(x,y+1),n=isWalk(x,y-1),e=isWalk(x+1,y),w=isWalk(x-1,y);
+  if(s&&e)return'INNER_TL';if(s&&w)return'INNER_TR';if(n&&e)return'INNER_BL';if(n&&w)return'INNER_BR';
+  if(s)return'TOP';if(n)return'BOTTOM';if(e)return'LEFT';if(w)return'RIGHT';
+  if(isWalk(x+1,y+1))return'OUTER_TL';if(isWalk(x-1,y+1))return'OUTER_TR';
+  if(isWalk(x+1,y-1))return'OUTER_BL';if(isWalk(x-1,y-1))return'OUTER_BR';
+  return null;}
+function floorAt(x,y){let h=(Math.imul(x>>>0,0x9E3779B1)^Math.imul(y>>>0,0x85EBCA6B))>>>0;h^=h>>>13;return FLOORS[h%12];}
+const MARK={[CHEST]:'#e8d24a',[MERCH]:'#4ad2e8',[ALTAR]:'#c060e0',[STAIRS]:'#5ad06a',[EVENT]:'#fff',[CAMP]:'#ff8030'};
+const ABBR={TOP:'T',BOTTOM:'B',LEFT:'L',RIGHT:'R',OUTER_TL:'oTL',OUTER_TR:'oTR',OUTER_BL:'oBL',OUTER_BR:'oBR',INNER_TL:'iTL',INNER_TR:'iTR',INNER_BL:'iBL',INNER_BR:'iBR'};
+const catText=nm=>nm[0]==='I'?'#ff6a6a':nm[0]==='O'?'#6cc0ff':'#9be89b';
+function blit(ctx,idx,dx,dy,sc){ctx.drawImage(img,(idx%COLS)*TS,((idx/COLS)|0)*TS,TS,TS,dx,dy,sc,sc);}
+let VW,VH,SC;
+function draw(){
+  SC=+document.getElementById('sc').value;
+  VW=Math.floor((window.innerWidth-360)/SC);VH=Math.floor((window.innerHeight-140)/SC);
+  if(VW<8)VW=8;if(VH<8)VH=8;
+  const cv=document.getElementById('cv');cv.width=VW*SC;cv.height=VH*SC;
+  const ctx=cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle=VOID;ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  for(let vy=0;vy<VH;vy++)for(let vx=0;vx<VW;vx++){
+    const x=ox+vx,y=oy+vy,dx=vx*SC,dy=vy*SC,t=tileAt(x,y);
+    if(t===WALL){const nm=wallCase(x,y);if(!nm)continue;blit(ctx,caseTile[nm],dx,dy,SC);
+      if(nm===selCase){ctx.fillStyle='rgba(255,230,80,.4)';ctx.fillRect(dx,dy,SC,SC);
+        ctx.strokeStyle='#ffe650';ctx.lineWidth=2;ctx.strokeRect(dx+1,dy+1,SC-2,SC-2);}
+      continue;}
+    blit(ctx,floorAt(x,y),dx,dy,SC);
+    if(MARK[t]){ctx.fillStyle=MARK[t];ctx.fillRect(dx+SC*0.3,dy+SC*0.3,SC*0.4,SC*0.4);}
+  }
+  if(hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(hover.vx*SC+1,hover.vy*SC+1,SC-2,SC-2);}
+  drawSheet();
+}
+function move(dx,dy){ox+=dx;oy+=dy;draw();}
+function buildPanel(){const c=document.getElementById('cases');c.innerHTML='';
+  CASES.forEach(([cat,nm,desc])=>{const d=document.createElement('div');d.className='cs '+cat;d.id='cs_'+nm;
+    d.innerHTML=`<b style="width:42px;display:inline-block">${ABBR[nm]}</b><span style="flex:1">${nm} <small style="color:#8a7f99">${desc}</small></span>`;
+    const inp=document.createElement('input');inp.type='number';inp.value=caseTile[nm];inp.min=0;inp.max=99;
+    inp.onfocus=()=>{selCase=nm;markSel();};
+    inp.oninput=()=>{caseTile[nm]=parseInt(inp.value)||0;saveCT();draw();};
+    d.appendChild(inp);d.onclick=()=>{selCase=nm;inp.focus();markSel();};
+    c.appendChild(d);});}
+function markSel(){CASES.forEach(([,nm])=>document.getElementById('cs_'+nm).classList.toggle('sel',nm===selCase));draw();}
+function drawSheet(){const sc=3;const s=document.getElementById('sheet'),l=document.getElementById('sheetlabels');
+  if(s.width!==img.width*sc){s.width=img.width*sc;s.height=img.height*sc;l.width=s.width;l.height=s.height;}
+  const ctx=s.getContext('2d');ctx.imageSmoothingEnabled=false;ctx.drawImage(img,0,0,s.width,s.height);
+  const lc=l.getContext('2d');lc.clearRect(0,0,l.width,l.height);lc.font='9px monospace';lc.strokeStyle='rgba(255,0,255,.3)';lc.fillStyle='#3df';
+  const tc=img.width/TS,tr=img.height/TS;
+  for(let r=0;r<tr;r++)for(let cc=0;cc<tc;cc++){lc.strokeRect(cc*TS*sc,r*TS*sc,TS*sc,TS*sc);lc.fillText(r*COLS+cc,cc*TS*sc+1,r*TS*sc+9);}}
+function exportCode(){
+  const list=CASES.map(([,nm])=>`${nm} = ${caseTile[nm]}`).join('\n');
+  const json=JSON.stringify(caseTile);
+  document.getElementById('exp').value=list+'\n\nJSON:\n'+json;
+  const m=document.getElementById('modal'); m.style.display='flex';
+  document.getElementById('exp').focus(); document.getElementById('exp').select();}
+const cv=document.getElementById('cv');let pan=null;
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();
+  if(pan){ox=pan.ox-Math.round((e.clientX-pan.sx)/SC);oy=pan.oy-Math.round((e.clientY-pan.sy)/SC);draw();return;}
+  const vx=Math.floor((e.clientX-r.left)/SC),vy=Math.floor((e.clientY-r.top)/SC);
+  if(vx<0||vy<0||vx>=VW||vy>=VH)return;hover={vx,vy};
+  const x=ox+vx,y=oy+vy,t=tileAt(x,y);let s;
+  if(t===WALL){const nm=wallCase(x,y);s=nm?`WALL ${nm}  тайл:${caseTile[nm]}`:'VOID';}
+  else if(t===FLOOR)s=`FLOOR тайл:${floorAt(x,y)}`;else s=`${TNAME[t]} (на полу)`;
+  document.getElementById('info').textContent=`(${x},${y}) ${s}`;draw();});
+cv.addEventListener('mousedown',e=>{if(e.button===1){pan={sx:e.clientX,sy:e.clientY,ox,oy};cv.style.cursor='grabbing';e.preventDefault();}});
+window.addEventListener('mouseup',e=>{if(e.button===1&&pan){pan=null;cv.style.cursor='crosshair';}});
+cv.addEventListener('wheel',e=>{e.preventDefault();let s=SC+(e.deltaY<0?2:-2);if(s<8)s=8;if(s>48)s=48;document.getElementById('sc').value=s;draw();},{passive:false});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();
+  const vx=Math.floor((e.clientX-r.left)/SC),vy=Math.floor((e.clientY-r.top)/SC);
+  const nm=tileAt(ox+vx,oy+vy)===WALL?wallCase(ox+vx,oy+vy):null;
+  if(nm){selCase=nm;document.getElementById('cs_'+nm).querySelector('input').focus();markSel();}
+  else{selCase=null;if(document.activeElement)document.activeElement.blur();markSel();}});
+document.getElementById('sheetlabels').addEventListener('click',e=>{const r=e.currentTarget.getBoundingClientRect();
+  const cc=Math.floor((e.clientX-r.left)/(TS*3)),rr=Math.floor((e.clientY-r.top)/(TS*3));const idx=rr*COLS+cc;
+  if(selCase){caseTile[selCase]=idx;document.getElementById('cs_'+selCase).querySelector('input').value=idx;saveCT();draw();}});
+img.onload=()=>{buildPanel();draw();};
+</script></body></html>

@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - button "↑" [ref=e3]
+    - button "↓" [ref=e4]
+    - button "←" [ref=e5]
+    - button "→" [ref=e6]
+    - button "⌂ старт-камп" [ref=e7]
+    - text: масштаб
+    - spinbutton [ref=e8]: "26"
+    - generic [ref=e9]:
+      - checkbox "показать названия" [ref=e10]
+      - text: показать названия
+    - generic [ref=e11]: наведи на клетку…
+  - generic [ref=e12]:
+    - text: заменить тайл
+    - spinbutton [ref=e13]
+    - text: →
+    - spinbutton [ref=e14]
+    - button "применить (глобально)" [ref=e15]
+    - button "сбросить все" [ref=e16]
+  - generic [ref=e19]:
+    - generic [ref=e20]: Клик по клетке — подставит её тайл в поле «заменить». Замена применяется ко всем клеткам с этим тайлом.
+    - generic [ref=e21]: "Тайлсет (клик — копирует индекс в «→»):"

@@ -11,5 +11,12 @@ enum TileType : uint8_t {
     TILE_CAMP,        // лагерь-чекпоинт (сохранение + точка респавна)
 };
 
+// Текущий этаж: 0 (верх, легко) … -128 (низ, тяжело). Глубже — сильнее монстры и награда.
+// Сила монстров теперь зависит от этажа, а не от уровня игрока (см. entities.cpp).
+extern int gFloor;
+#define FLOOR_MIN (-128)
+#define FLOOR_MAX 0
+
 uint8_t tileAt(int32_t x, int32_t y);   // тип клетки в мировых координатах
 bool    isWalkable(int32_t x, int32_t y);
+bool    inCamp(int32_t x, int32_t y);   // клетка внутри безопасной комнаты-кампа

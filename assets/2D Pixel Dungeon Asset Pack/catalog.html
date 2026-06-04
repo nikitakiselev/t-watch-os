@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Каталог спрайтов</title>
+<style>
+ body{background:#14101a;color:#cdc6d6;font-family:system-ui,sans-serif;margin:0;padding:18px}
+ h2{color:#e0a040;border-bottom:1px solid #3a3047;padding-bottom:4px;margin-top:28px}
+ canvas{image-rendering:pixelated;background:#251316;border-radius:4px}
+ .grid{display:flex;flex-wrap:wrap;gap:12px}
+ .it{background:#221b2b;border:1px solid #3a3047;border-radius:8px;padding:8px;text-align:center;font-size:11px;color:#9a8fb0}
+ .it b{display:block;color:#cdc6d6;font-size:12px;margin-bottom:4px}
+ .sheetbox{position:relative;display:inline-block}
+ .sheetbox canvas.lbl{position:absolute;left:0;top:0}
+</style></head><body>
+<h1>Каталог спрайтов — 2D Pixel Dungeon</h1>
+<p style="color:#8a7f99">Анимация проигрывается автоматически. Имя файла под каждым спрайтом.</p>
+
+<h2>Персонажи (листы)</h2><div class="grid" id="sheets"></div>
+<h2>Монстры (idle-анимация)</h2><div class="grid" id="monsters"></div>
+<h2>Жрецы / NPC (idle)</h2><div class="grid" id="priests"></div>
+<h2>Предметы (анимация)</h2><div class="grid" id="items"></div>
+<h2>Ловушки и декор</h2><div class="grid" id="traps"></div>
+
+<script>
+const SC=4;
+const enc=p=>p.split('/').map(encodeURIComponent).join('/');
+let timer=0; const anims=[];
+function animBox(parent,label,frames,w=16,h=16){
+  const d=document.createElement('div');d.className='it';
+  const cv=document.createElement('canvas');cv.width=w*SC;cv.height=h*SC;
+  d.innerHTML=`<b>${label}</b>`;d.appendChild(cv);
+  const small=document.createElement('div');small.textContent=frames.length+' кадр(ов)';d.appendChild(small);
+  parent.appendChild(d);
+  const imgs=frames.map(p=>{const i=new Image();i.src=enc(p);return i;});
+  anims.push({cv,imgs,w,h});
+}
+function tick(){timer++;const f=Math.floor(timer/12);
+  for(const a of anims){const ctx=a.cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+    ctx.clearRect(0,0,a.cv.width,a.cv.height);const im=a.imgs[f%a.imgs.length];
+    if(im.complete)ctx.drawImage(im,0,0,a.w,a.h,0,0,a.w*SC,a.h*SC);}
+  requestAnimationFrame(tick);}
+
+// --- листы персонажей с сеткой 16px ---
+function sheet(parent,label,path,tw=16,th=16){
+  const d=document.createElement('div');d.className='it';d.innerHTML=`<b>${label}</b>`;
+  const box=document.createElement('div');box.className='sheetbox';
+  const im=new Image();im.src=enc(path);
+  im.onload=()=>{const sc=4;const c=document.createElement('canvas');c.width=im.width*sc;c.height=im.height*sc;
+    const x=c.getContext('2d');x.imageSmoothingEnabled=false;x.drawImage(im,0,0,c.width,c.height);
+    const l=document.createElement('canvas');l.className='lbl';l.width=c.width;l.height=c.height;
+    const lc=l.getContext('2d');lc.strokeStyle='rgba(0,255,255,.4)';lc.fillStyle='#3df';lc.font='9px monospace';
+    let n=0;for(let r=0;r<im.height/th;r++)for(let cc=0;cc<im.width/tw;cc++){lc.strokeRect(cc*tw*sc,r*th*sc,tw*sc,th*sc);lc.fillText(n++,cc*tw*sc+1,r*th*sc+9);}
+    box.appendChild(c);box.appendChild(l);};
+  d.appendChild(box);parent.appendChild(d);
+}
+
+const S=document.getElementById('sheets');
+sheet(S,'Dungeon_Character.png (7×4)','character and tileset/Dungeon_Character.png');
+sheet(S,'Dungeon_Character_2.png (7×2)','character and tileset/Dungeon_Character_2.png');
+
+// --- монстры ---
+const MON=document.getElementById('monsters');
+const monDirs=[['skeleton1','skeleton'],['skeleton2','skeleton2'],['skull','skull'],['vampire','vampire']];
+for(const [dir,pre] of monDirs)for(const v of ['v1','v2'])
+  animBox(MON,`${dir} ${v}`,[1,2,3,4].map(i=>`Character_animation/monsters_idle/${dir}/${v}/${pre}_${v}_${i}.png`));
+
+const PR=document.getElementById('priests');
+for(const dir of ['priest1','priest2','priest3'])for(const v of ['v1','v2'])
+  animBox(PR,`${dir} ${v}`,[1,2,3,4].map(i=>`Character_animation/priests_idle/${dir}/${v}/${dir}_${v}_${i}.png`));
+
+// --- предметы ---
+const IT=document.getElementById('items');
+const base='items and trap_animation/';
+animBox(IT,'chest (закрыт)',[1,2,3,4].map(i=>base+`chest/chest_${i}.png`));
+animBox(IT,'chest (открытие)',[1,2,3,4].map(i=>base+`chest/chest_open_${i}.png`));
+animBox(IT,'mini_chest',[1,2,3,4].map(i=>base+`mini_chest/mini_chest_${i}.png`));
+animBox(IT,'mini_chest open',[1,2,3,4].map(i=>base+`mini_chest/mini_chest_open_${i}.png`));
+animBox(IT,'coin',[1,2,3,4].map(i=>base+`coin/coin_${i}.png`));
+for(const k of [1,2,3,4]) animBox(IT,`flask ${k}`,[1,2,3,4].map(i=>base+`flasks/flasks_${k}_${i}.png`));
+for(const k of [1,2]) animBox(IT,`keys ${k}`,[1,2,3,4].map(i=>base+`keys/keys_${k}_${i}.png`));
+for(const k of [1,2]) animBox(IT,`box_${k}`,[1,2,3,4].map(i=>base+`box_${k}/box_${k}_${i}.png`));
+for(const k of [1,2]) animBox(IT,`mini_box_${k}`,[1,2,3,4].map(i=>base+`mini_box_${k}/mini_box_${k}_${i}.png`));
+
+// --- ловушки и декор ---
+const TR=document.getElementById('traps');
+animBox(TR,'torch',[1,2,3,4].map(i=>base+`torch/torch_${i}.png`));
+animBox(TR,'side_torch',[1,2,3,4].map(i=>base+`torch/side_torch_${i}.png`));
+animBox(TR,'candlestick_1',[1,2,3,4].map(i=>base+`torch/candlestick_1_${i}.png`));
+animBox(TR,'candlestick_2',[1,2,3,4].map(i=>base+`torch/candlestick_2_${i}.png`));
+animBox(TR,'flag',[1,2,3,4].map(i=>base+`flag/flag_${i}.png`));
+animBox(TR,'peaks (шипы)',[1,2,3,4].map(i=>base+`peaks/peaks_${i}.png`));
+animBox(TR,'flamethrower ↑',[1,2,3,4].map(i=>base+`flamethrower/flamethrower_1_${i}.png`),16,32);
+animBox(TR,'flamethrower →',[1,2,3,4].map(i=>base+`flamethrower/flamethrower_2_${i}.png`),32,16);
+animBox(TR,'arrow trap',[1,2,3,4].map(i=>base+`arrow/arrow_${i}.png`),16,32);
+
+requestAnimationFrame(tick);
+</script></body></html>

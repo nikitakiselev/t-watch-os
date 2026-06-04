@@ -49,6 +49,7 @@ void invEquip(int i)
         invRemoveAt(i);
         if (hasArmor) invAdd(equArmor);
         equArmor = it; hasArmor = true;
+        playerRecalcMax();                   // броня может давать +HP/+MP (VITALITY/SPIRIT)
     }
 }
 
@@ -75,12 +76,6 @@ int invFindHpPotion()
 {
     for (int i = 0; i < invCount; i++) if (inv[i].kind == IT_HP_POTION) return i;
     return -1;
-}
-
-int itemSellValue(const Item &it)
-{
-    if (itemIsGear(it)) return it.power * 3 + it.rarity * 12 + 5;   // ~половина закупки
-    return 10;                                                     // зелья
 }
 
 int invSell(int i)

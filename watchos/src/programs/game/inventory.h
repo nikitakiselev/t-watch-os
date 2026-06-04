@@ -15,5 +15,4 @@ bool invUse(int i);              // использовать зелье; false �
 int  playerAtkBonus();           // +атака от оружия
 int  playerDefBonus();           // +защита от брони
 int  invFindHpPotion();          // индекс первого зелья HP или -1
-int  itemSellValue(const Item &it);   // цена продажи предмета
-int  invSell(int i);             // продать 1 ед. предмета, вернуть полученное золото
+int  invSell(int i);             // продать 1 ед. предмета (у торговца), вернуть золото

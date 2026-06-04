@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Редактор кампа</title>
+<style>
+ body{background:#0f0c14;color:#cdc6d6;font-family:system-ui,sans-serif;margin:0;padding:14px}
+ canvas{image-rendering:pixelated}
+ #cv{border:1px solid #3a3047;cursor:pointer}
+ #wrap{display:flex;gap:16px;align-items:flex-start}
+ #panel{width:340px;flex:none}
+ .bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+ button{background:#221b2b;color:#cdc6d6;border:1px solid #4a4057;border-radius:6px;padding:6px 9px;cursor:pointer}
+ button.sel{outline:2px solid #ffe650;color:#ffe650}
+ .grp{font-size:12px;color:#8a7f99;margin:10px 0 4px}
+ #sheetwrap{position:relative}#sheetlabels{position:absolute;left:0;top:0;pointer-events:none}
+ #info{font-family:monospace;font-size:13px;color:#e0a040}
+ #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10;align-items:center;justify-content:center}
+ textarea{width:520px;height:320px;font-family:monospace;font-size:12px;background:#16121c;color:#cdc6d6;border:1px solid #4a4057;border-radius:6px}
+</style></head><body>
+<div class="bar">
+ <span id="info">кисть: пол</span>
+ <button onclick="loadDefault()">сброс к дефолту</button>
+ <button onclick="exportCamp()">экспорт</button>
+</div>
+<div id="wrap">
+ <canvas id="cv"></canvas>
+ <div id="panel">
+   <div class="grp">Террейн / объекты (клик — выбрать кисть, потом рисуй по сетке):</div>
+   <div class="bar" id="brushes"></div>
+   <div class="grp">Декор — выбери тайл в листе и крась им клетки (рисуется поверх пола):</div>
+   <div class="bar"><button data-b="erase">стереть декор</button></div>
+   <div id="sheetwrap"><canvas id="sheet"></canvas><canvas id="sheetlabels"></canvas></div>
+ </div>
+</div>
+<div id="modal"><div style="background:#221b2b;border:1px solid #4a4057;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px">
+ <b>Раскладка кампа</b><textarea id="exp"></textarea>
+ <div class="bar"><button onclick="document.getElementById('exp').select();document.execCommand('copy')">скопировать</button>
+ <button onclick="document.getElementById('modal').style.display='none'">закрыть</button></div></div></div>
+<script>
+const TS=16,COLS=10,C=12,MID=6,SCALE=34;
+const FLOORS=[11,12,13,14,21,22,23,24,31,32,33,34];
+const img=new Image(); img.src='tileset.png';
+// стены автотайл (финальный маппинг)
+const CT={TOP:1,BOTTOM:41,LEFT:10,RIGHT:15,OUTER_TL:0,OUTER_TR:5,OUTER_BL:40,OUTER_BR:45,INNER_TL:3,INNER_TR:4,INNER_BL:55,INNER_BR:50};
+// типы клеток
+const TYPES={floor:{c:'#3a2f48',lbl:'пол'},wall:{c:'#6a4a40',lbl:'стена'},door:{c:'#2f3a48',lbl:'дверь'},
+ camp:{c:'#ff8030',lbl:'костёр(save)'},merch:{c:'#4ad2e8',lbl:'торговец'},altar:{c:'#c060e0',lbl:'алтарь'},
+ chest:{c:'#e8d24a',lbl:'сундук'},stairs:{c:'#5ad06a',lbl:'лестница'}};
+const MARK={camp:'#ff8030',merch:'#4ad2e8',altar:'#c060e0',chest:'#e8d24a',stairs:'#5ad06a'};
+let grid=[]; // [ly][lx] = {t, deco}
+let brush={kind:'cell',val:'floor'};
+let hover=null;
+
+function loadDefault(){
+  grid=[];
+  for(let y=0;y<C;y++){const row=[];for(let x=0;x<C;x++){
+    let t='floor';
+    const border=(x===0||x===C-1||y===0||y===C-1);
+    if(border){const door=(x===MID&&(y===0||y===C-1))||(y===MID&&(x===0||x===C-1));t=door?'door':'wall';}
+    if(x===3&&y===3)t='camp'; if(x===8&&y===3)t='merch'; if(x===3&&y===8)t='altar';
+    row.push({t,deco:-1});}
+    grid.push(row);}
+  draw();
+}
+const walk=(x,y)=> (x>=0&&y>=0&&x<C&&y<C) && grid[y][x].t!=='wall';
+function wallCase(x,y){const s=walk(x,y+1),n=walk(x,y-1),e=walk(x+1,y),w=walk(x-1,y);
+  if(s&&e)return'INNER_TL';if(s&&w)return'INNER_TR';if(n&&e)return'INNER_BL';if(n&&w)return'INNER_BR';
+  if(s)return'TOP';if(n)return'BOTTOM';if(e)return'LEFT';if(w)return'RIGHT';
+  if(walk(x+1,y+1))return'OUTER_TL';if(walk(x-1,y+1))return'OUTER_TR';
+  if(walk(x+1,y-1))return'OUTER_BL';if(walk(x-1,y-1))return'OUTER_BR';return null;}
+function floorAt(x,y){let h=(Math.imul((x+97)>>>0,0x9E3779B1)^Math.imul((y+43)>>>0,0x85EBCA6B))>>>0;h^=h>>>13;return FLOORS[h%12];}
+function blit(ctx,idx,dx,dy){ctx.drawImage(img,(idx%COLS)*TS,((idx/COLS)|0)*TS,TS,TS,dx,dy,SCALE,SCALE);}
+function draw(){
+  const cv=document.getElementById('cv');cv.width=C*SCALE;cv.height=C*SCALE;
+  const ctx=cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle='#251316';ctx.fillRect(0,0,cv.width,cv.height);
+  for(let y=0;y<C;y++)for(let x=0;x<C;x++){const cell=grid[y][x],dx=x*SCALE,dy=y*SCALE;
+    if(cell.t==='wall'){const nm=wallCase(x,y);if(nm)blit(ctx,CT[nm],dx,dy);continue;}
+    blit(ctx,floorAt(x,y),dx,dy);                 // пол
+    if(cell.deco>=0)blit(ctx,cell.deco,dx,dy);    // декор поверх
+    if(MARK[cell.t]){ctx.fillStyle=MARK[cell.t];ctx.fillRect(dx+SCALE*0.3,dy+SCALE*0.3,SCALE*0.4,SCALE*0.4);}
+  }
+  // сетка
+  ctx.strokeStyle='rgba(255,255,255,.08)';for(let i=0;i<=C;i++){ctx.beginPath();ctx.moveTo(i*SCALE,0);ctx.lineTo(i*SCALE,C*SCALE);ctx.moveTo(0,i*SCALE);ctx.lineTo(C*SCALE,i*SCALE);ctx.stroke();}
+  if(hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(hover.x*SCALE+1,hover.y*SCALE+1,SCALE-2,SCALE-2);}
+  drawSheet();
+}
+function paint(x,y){if(x<0||y<0||x>=C||y>=C)return;const cell=grid[y][x];
+  if(brush.kind==='cell')cell.t=brush.val;
+  else if(brush.kind==='deco')cell.deco=brush.val;
+  else if(brush.kind==='erase')cell.deco=-1; draw();}
+function buildBrushes(){const b=document.getElementById('brushes');b.innerHTML='';
+  Object.keys(TYPES).forEach(k=>{const btn=document.createElement('button');btn.textContent=TYPES[k].lbl;btn.dataset.b='cell:'+k;
+    btn.onclick=()=>{brush={kind:'cell',val:k};selBrush(btn);document.getElementById('info').textContent='кисть: '+TYPES[k].lbl;};b.appendChild(btn);});}
+function selBrush(el){document.querySelectorAll('#panel button,#brushes button').forEach(x=>x.classList.remove('sel'));if(el)el.classList.add('sel');}
+function drawSheet(){const sc=3;const s=document.getElementById('sheet'),l=document.getElementById('sheetlabels');
+  if(s.width!==img.width*sc){s.width=img.width*sc;s.height=img.height*sc;l.width=s.width;l.height=s.height;
+    const lc=l.getContext('2d');lc.font='9px monospace';lc.strokeStyle='rgba(255,0,255,.3)';lc.fillStyle='#3df';
+    const tc=img.width/TS,tr=img.height/TS;for(let r=0;r<tr;r++)for(let cc=0;cc<tc;cc++){lc.strokeRect(cc*TS*sc,r*TS*sc,TS*sc,TS*sc);lc.fillText(r*COLS+cc,cc*TS*sc+1,r*TS*sc+9);}}
+  const ctx=s.getContext('2d');ctx.imageSmoothingEnabled=false;ctx.drawImage(img,0,0,s.width,s.height);}
+function exportCamp(){
+  // тип-коды: .=floor #=wall D=door C=camp M=merch A=altar H=chest S=stairs
+  const code={floor:'.',wall:'#',door:'D',camp:'C',merch:'M',altar:'A',chest:'H',stairs:'S'};
+  let t='ТИПЫ (12x12):\n';
+  for(let y=0;y<C;y++){t+=grid[y].map(c=>code[c.t]).join('')+'\n';}
+  t+='\nДЕКОР (idx тайла, -- = нет):\n';
+  for(let y=0;y<C;y++){t+=grid[y].map(c=>c.deco<0?'--':String(c.deco).padStart(2,'0')).join(' ')+'\n';}
+  t+='\nJSON:\n'+JSON.stringify(grid.map(r=>r.map(c=>[c.t,c.deco])));
+  document.getElementById('exp').value=t;document.getElementById('modal').style.display='flex';
+  document.getElementById('exp').focus();document.getElementById('exp').select();}
+// мышь
+const cv=document.getElementById('cv');let down=false;
+function cellAt(e){const r=cv.getBoundingClientRect();return [Math.floor((e.clientX-r.left)/SCALE),Math.floor((e.clientY-r.top)/SCALE)];}
+cv.addEventListener('mousedown',e=>{down=true;const[x,y]=cellAt(e);paint(x,y);});
+cv.addEventListener('mousemove',e=>{const[x,y]=cellAt(e);
+  hover=(x>=0&&y>=0&&x<C&&y<C)?{x,y}:null;
+  if(down)paint(x,y); else draw();
+  if(hover){const c=grid[y][x];document.getElementById('info').textContent=`(${x},${y}) ${TYPES[c.t]?.lbl||c.t}${c.deco>=0?' +декор '+c.deco:''}  |  кисть: ${brush.kind==='deco'?'декор '+brush.val:brush.kind==='erase'?'стереть декор':TYPES[brush.val]?.lbl}`;}});
+cv.addEventListener('mouseleave',()=>{hover=null;draw();});
+window.addEventListener('mouseup',()=>down=false);
+document.getElementById('sheetlabels').addEventListener('click',e=>{const r=e.currentTarget.getBoundingClientRect();
+  const cc=Math.floor((e.clientX-r.left)/(TS*3)),rr=Math.floor((e.clientY-r.top)/(TS*3));brush={kind:'deco',val:rr*COLS+cc};
+  selBrush(null);document.getElementById('info').textContent='кисть: декор тайл '+(rr*COLS+cc);});
+document.querySelector('[data-b="erase"]').onclick=function(){brush={kind:'erase'};selBrush(this);document.getElementById('info').textContent='кисть: стереть декор';};
+img.onload=()=>{buildBrushes();loadDefault();};
+</script></body></html>
