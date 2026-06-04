@@ -152,9 +152,14 @@ void soundBeep(int freq, int durMs)
     if (taskH) vTaskResume(taskH);
 }
 
+// Парность begin/end: защищает от двойного begin и осиротевшего suspend
+// (иначе незакрытая запись навсегда оставит аудио-задачу suspended → звука нет до ребута).
+static bool micActive = false;
+
 // Установить I2S0 в режим PDM RX (приостановив аудио-задачу, владеющую I2S0).
 bool micCaptureBegin()
 {
+    if (micActive) return false;             // уже идёт запись — не дублируем suspend
     if (taskH) vTaskSuspend(taskH);
     i2s_driver_uninstall(I2S_NUM_0);
 
@@ -178,6 +183,7 @@ bool micCaptureBegin()
     pin.data_in_num = MIC_DATA;
     i2s_set_pin(I2S_NUM_0, &pin);
     i2s_set_clk(I2S_NUM_0, 16000, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+    micActive = true;
     return true;
 }
 
@@ -192,6 +198,8 @@ int micCaptureRead(int16_t *dst, int maxSamples)
 // Вернуть I2S0 в TX-конфиг библиотеки Audio и пины динамика, resume аудио-задачи.
 void micCaptureEnd()
 {
+    if (!micActive) return;                  // не было записи — нечего восстанавливать
+    micActive = false;
     i2s_driver_uninstall(I2S_NUM_0);
 
     i2s_config_t cfg = {};
