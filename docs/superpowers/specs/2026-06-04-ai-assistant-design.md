@@ -59,7 +59,7 @@ IDLE (🎤)
 RECORDING (🔴 + индикатор)      ── cap ~15 c → авто-стоп как отпускание
   │  touch-up
   ▼
-UPLOADING (↑)   POST WAV(+UUID)
+UPLOADING (↑)   POST LPCM(+UUID)
   │
   ▼
 PROCESSING (…)  ждём ответ сервера (STT→GPT→TTS)
@@ -116,8 +116,9 @@ PDM-входе даст артефакты — фоллбэк: писать на
 
 ### `aiclient.{h,cpp}` (новый) — сетевой протокол
 - `String aiSend(const char* serverUrl, const char* uuid, const int16_t* pcm, int samples);`
-  Формирует WAV (44-байт заголовок + LPCM 16 кГц/16 бит/моно), POST на
-  `serverUrl` с `?session=UUID`, `Content-Type: audio/wav`. Возвращает URL ответа
+  Шлёт сырой LPCM 16 кГц/16 бит/моно (нативный формат Yandex STT, без WAV-
+  заголовка), POST на `serverUrl` с `?session=UUID`,
+  `Content-Type: application/octet-stream`. Возвращает URL ответа
   (тело/JSON) или `""` при ошибке. `HTTPClient`, таймаут ~15 c.
 - Адрес сервера читается из SPIFFS-файла `/ai_server.txt` (как `stations.txt` —
   меняется без перепрошивки), с дефолтом-константой в коде. Заливается через
@@ -132,7 +133,7 @@ PDM-входе даст артефакты — фоллбэк: писать на
 Один сервис **FastAPI** (`server/app.py`), один контейнер, том для `data/`.
 
 ### Эндпоинты
-- `POST /talk?session=UUID` — тело: WAV (LPCM 16 кГц моно).
+- `POST /talk?session=UUID` — тело: сырой LPCM 16 кГц/16 бит/моно.
   1. Yandex SpeechKit **STT** → текст реплики пользователя.
   2. Дописать `user: <текст>` в `data/sessions/UUID.txt`.
   3. **YandexGPT**: system-промпт («отвечай кратко, разговорно») + история из файла
@@ -158,7 +159,7 @@ PDM-входе даст артефакты — фоллбэк: писать на
 ## Поток данных
 
 ```
-[hold] mic→PSRAM PCM ──release──> POST WAV(+UUID) ──> STT ──> append txt
+[hold] mic→PSRAM PCM ──release──> POST LPCM(+UUID) ──> STT ──> append txt
                                                           ──> YandexGPT(history) ──> append txt
                                                           ──> TTS mp3 ──> save
    play(connecttohost) <── URL <────────────────────────────┘
