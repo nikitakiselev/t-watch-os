@@ -7,6 +7,7 @@
 #include "src/programs/prog_stopwatch.h"
 #include "src/programs/prog_settings.h"
 #include "src/programs/prog_system.h"
+#include "src/programs/prog_assistant.h"
 
 // ─────────────────────── Реестр приложений ───────────────────────
 // Приложение — это обычная Program. Файлы программ лежат в src/programs/.
@@ -20,6 +21,7 @@ static const Program *const appList[] = {
     &clockProgram,
     &wifiProgram,
     &radioProgram,
+    &assistantProgram,
     &gameProgram,
     &touchtestProgram,
     &stopwatchProgram,
