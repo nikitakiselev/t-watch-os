@@ -1,5 +1,6 @@
 import asyncio, logging, time
 import re
+from pathlib import Path
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.concurrency import run_in_threadpool
@@ -10,6 +11,12 @@ from server.config import get_settings
 app = FastAPI(title="watchos AI assistant")
 
 _SAFE = re.compile(r"^[A-Za-z0-9_-]+$")
+_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+@app.get("/")
+def index():
+    return FileResponse(_INDEX, media_type="text/html")
 
 
 @app.post("/talk")
