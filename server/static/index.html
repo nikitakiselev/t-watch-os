@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>watchOS AI assistant — debug</title>
+<style>
+  :root { --bg:#0a0f0a; --green:#33ff66; --amber:#ffb300; --dim:#2a6b3a; --frame:#163; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--green);
+         font-family:ui-monospace,Menlo,Consolas,monospace;
+         min-height:100vh; display:flex; flex-direction:column; align-items:center;
+         padding:18px; gap:16px; -webkit-user-select:none; user-select:none; }
+  h1 { font-size:16px; font-weight:600; color:var(--amber); margin:4px 0 0; letter-spacing:1px; }
+  #session { font-size:11px; color:var(--dim); word-break:break-all; text-align:center; }
+  #session button { font:inherit; font-size:11px; background:none; color:var(--dim);
+                    border:1px solid var(--frame); border-radius:4px; padding:2px 6px;
+                    margin-left:6px; cursor:pointer; }
+  #mic { width:180px; height:180px; border-radius:50%; border:3px solid var(--green);
+         background:#0d160d; color:var(--green); font:inherit; font-size:15px;
+         display:flex; align-items:center; justify-content:center; text-align:center;
+         cursor:pointer; touch-action:none; transition:all .12s; padding:10px; }
+  #mic.rec   { border-color:#ff4444; color:#ff6666; background:#1a0d0d; transform:scale(1.04); }
+  #mic.busy  { border-color:var(--amber); color:var(--amber); }
+  #mic.play  { border-color:#33ccff; color:#33ccff; }
+  #mic:disabled { opacity:.6; cursor:default; }
+  #status { font-size:14px; min-height:18px; color:var(--amber); }
+  #logbar { width:100%; max-width:520px; display:flex; gap:8px; justify-content:flex-end; }
+  #logbar button { font:inherit; font-size:11px; background:none; color:var(--dim);
+                   border:1px solid var(--frame); border-radius:4px; padding:3px 8px; cursor:pointer; }
+  #logbar button:active { color:var(--green); border-color:var(--green); }
+  #log { width:100%; max-width:520px; flex:1; min-height:120px; overflow-y:auto;
+         border:1px solid var(--frame); border-radius:6px; padding:8px;
+         font-size:12px; line-height:1.5; background:#060a06;
+         user-select:text; -webkit-user-select:text; cursor:text; white-space:pre-wrap; }
+  .l-me  { color:var(--green); }
+  .l-sys { color:var(--dim); }
+  .l-err { color:#ff6666; }
+  .hint { font-size:11px; color:var(--dim); text-align:center; max-width:520px; }
+</style>
+</head>
+<body>
+  <h1>[ AI ASSISTANT · DEBUG ]</h1>
+  <div id="session">session: <span id="sid">—</span><button id="newSession">new</button></div>
+  <button id="mic">hold&nbsp;to&nbsp;talk</button>
+  <div id="status">idle</div>
+  <div id="logbar"><button id="copyLog">copy log</button><button id="clearLog">clear</button></div>
+  <div id="log" aria-live="polite"></div>
+  <div class="hint">Зажми кнопку и говори, отпусти — отправится. Нужен доступ к микрофону и HTTPS либо localhost.</div>
+
+<script>
+"use strict";
+const SR = 16000;
+const micBtn  = document.getElementById("mic");
+const statusEl= document.getElementById("status");
+const logEl   = document.getElementById("log");
+const sidEl   = document.getElementById("sid");
+
+let sessionId = newId();
+sidEl.textContent = sessionId;
+
+let audioCtx = null;     // переиспользуем между записями
+let mediaStream = null;
+let procNode = null, srcNode = null, zeroGain = null;
+let chunks = [];         // Float32Array фрагменты текущей записи
+let recording = false;
+let busy = false;        // идёт отправка/обработка/воспроизведение — кнопка занята
+
+function newId() {
+  return (crypto.randomUUID && crypto.randomUUID()) ||
+         (Date.now().toString(16) + Math.random().toString(16).slice(2));
+}
+
+function log(msg, cls) {
+  const d = document.createElement("div");
+  d.className = cls || "l-sys";
+  d.textContent = new Date().toLocaleTimeString() + "  " + msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setState(s) {
+  micBtn.classList.remove("rec", "busy", "play");
+  if (s === "recording")      { micBtn.classList.add("rec");  statusEl.textContent = "recording…";  micBtn.textContent = "release"; }
+  else if (s === "uploading") { micBtn.classList.add("busy"); statusEl.textContent = "uploading…"; }
+  else if (s === "processing"){ micBtn.classList.add("busy"); statusEl.textContent = "processing…"; }
+  else if (s === "speaking")  { micBtn.classList.add("play"); statusEl.textContent = "speaking…"; }
+  else                        { statusEl.textContent = "idle"; micBtn.textContent = "hold to talk"; }
+  micBtn.disabled = busy && s !== "speaking";
+}
+
+async function ensureAudio() {
+  if (!mediaStream) {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    });
+  }
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
+  }
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+}
+
+function startRecording() {
+  chunks = [];
+  srcNode  = audioCtx.createMediaStreamSource(mediaStream);
+  procNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  zeroGain = audioCtx.createGain();
+  zeroGain.gain.value = 0;                         // без обратной связи в динамик
+  procNode.onaudioprocess = (e) => {
+    if (!recording) return;
+    chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  };
+  srcNode.connect(procNode);
+  procNode.connect(zeroGain);
+  zeroGain.connect(audioCtx.destination);          // нужно, чтобы процессор тикал
+  recording = true;
+  setState("recording");
+}
+
+function teardownNodes() {
+  try { if (srcNode)  srcNode.disconnect(); } catch (_) {}
+  try { if (procNode) { procNode.disconnect(); procNode.onaudioprocess = null; } } catch (_) {}
+  try { if (zeroGain) zeroGain.disconnect(); } catch (_) {}
+  srcNode = procNode = zeroGain = null;
+}
+
+function chunksToLPCM() {
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const pcm = new DataView(new ArrayBuffer(total * 2));
+  let off = 0;
+  for (const c of chunks) {
+    for (let i = 0; i < c.length; i++) {
+      let s = Math.max(-1, Math.min(1, c[i]));
+      pcm.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);  // little-endian
+      off += 2;
+    }
+  }
+  return { buffer: pcm.buffer, samples: total };
+}
+
+async function stopAndSend() {
+  recording = false;
+  teardownNodes();
+  const { buffer, samples } = chunksToLPCM();
+  chunks = [];
+  const secs = (samples / SR).toFixed(1);
+
+  if (samples < SR * 0.3) {                          // < 0.3 c — слишком коротко
+    log("(слишком коротко, " + secs + "s)", "l-sys");
+    busy = false; setState("idle");
+    return;
+  }
+
+  busy = true; setState("uploading");
+  log("→ отправлено " + secs + "s", "l-me");
+
+  try {
+    const resp = await fetch("/talk?session=" + encodeURIComponent(sessionId), {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: buffer
+    });
+    if (resp.status === 204) {
+      log("← не распознано", "l-sys");
+      busy = false; setState("idle");
+      return;
+    }
+    if (!resp.ok) {
+      let detail = "HTTP " + resp.status;
+      try { const j = await resp.json(); if (j && j.error) detail = j.error; } catch (_) {}
+      throw new Error(detail);
+    }
+    setState("processing");
+    const data = await resp.json();
+    log("← " + data.url, "l-sys");
+    await play(data.url);
+  } catch (err) {
+    log("ошибка: " + err.message, "l-err");
+    busy = false; setState("idle");
+  }
+}
+
+// Играем ответ через AudioContext (он уже разблокирован жестом записи) —
+// так обходим autoplay-политику HTMLAudioElement, которая блокирует play()
+// спустя несколько секунд после жеста.
+async function play(url) {
+  setState("speaking");
+  const done = () => { busy = false; setState("idle"); };
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const buf = await resp.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(buf);
+    await new Promise((resolve) => {
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(audioCtx.destination);
+      src.onended = resolve;
+      src.start();
+    });
+    done();
+  } catch (err) {
+    log("ошибка воспроизведения: " + err.message, "l-err");
+    done();
+  }
+}
+
+// ── ввод: hold-to-talk через Pointer Events (мышь + тач) ──
+micBtn.addEventListener("pointerdown", async (e) => {
+  e.preventDefault();
+  if (busy || recording) return;
+  try {
+    await ensureAudio();
+    startRecording();
+    micBtn.setPointerCapture(e.pointerId);
+  } catch (err) {
+    log("нет доступа к микрофону: " + err.message, "l-err");
+    setState("idle");
+  }
+});
+function endHold(e) {
+  if (!recording) return;
+  e.preventDefault();
+  stopAndSend();
+}
+micBtn.addEventListener("pointerup", endHold);
+micBtn.addEventListener("pointercancel", endHold);
+
+const copyBtn = document.getElementById("copyLog");
+copyBtn.addEventListener("click", async () => {
+  const txt = logEl.innerText;
+  try {
+    await navigator.clipboard.writeText(txt);
+    const old = copyBtn.textContent;
+    copyBtn.textContent = "copied!";
+    setTimeout(() => { copyBtn.textContent = old; }, 1200);
+  } catch (_) {
+    // clipboard недоступен (не HTTPS/localhost) — выделяем лог, чтобы скопировать вручную
+    const r = document.createRange();
+    r.selectNodeContents(logEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+});
+document.getElementById("clearLog").addEventListener("click", () => { logEl.textContent = ""; });
+
+document.getElementById("newSession").addEventListener("click", () => {
+  sessionId = newId();
+  sidEl.textContent = sessionId;
+  log("— новая сессия —", "l-sys");
+});
+
+log("session " + sessionId, "l-sys");
+</script>
+</body>
+</html>
