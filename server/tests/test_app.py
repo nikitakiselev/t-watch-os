@@ -8,6 +8,15 @@ def make_client(tmp_path, monkeypatch):
     return TestClient(appmod.app)
 
 
+def test_index_served(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    r = c.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "/talk" in r.text            # страница знает про эндпоинт
+    assert "AudioContext" in r.text     # шлёт сырой LPCM через WebAudio
+
+
 def test_talk_returns_url(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod.pipeline, "process_turn",
                         lambda s, sid, audio: "http://h:8080/audio/x/0.mp3")
