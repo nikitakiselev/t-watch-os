@@ -1,8 +1,9 @@
+import asyncio, time
 import re
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 
-from server import pipeline
+from server import cleanup, pipeline
 from server.config import get_settings
 
 app = FastAPI(title="watchos AI assistant")
@@ -32,3 +33,13 @@ def audio(session_id: str, name: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(path, media_type="audio/mpeg")
+
+
+@app.on_event("startup")
+async def _start_cleanup():
+    async def loop():
+        while True:
+            s = get_settings()
+            cleanup.cleanup_old(s.data_dir, s.session_ttl, time.time())
+            await asyncio.sleep(3600)
+    asyncio.create_task(loop())
