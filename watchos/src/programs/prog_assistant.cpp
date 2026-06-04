@@ -156,6 +156,16 @@ static void stopRecording()
     state = ST_SENDING;                    // рисуем «...» ДО блокирующего POST
     drawScreen();
 
+    // После light-sleep Wi-Fi-модем гаснет и линк отваливается (значок при этом ещё
+    // «горит»). Перед отправкой убеждаемся, что связь жива — иначе переподключаемся.
+    if (!wifiConnected()) wifiAutoConnect(8000, nullptr);
+    if (!wifiConnected()) {
+        soundBeep(300, 120);
+        state = ST_IDLE;
+        drawScreen();
+        return;
+    }
+
     AiResult res = aiSend(sessionId, recBuf, recSamples);   // блокирует ~5-10 c
 
     if (res.code == 200 && res.url.length() > 0) {
@@ -209,7 +219,12 @@ static void assistantTick()
     }
 }
 
+// Нижняя панель: одна кнопка «Exit» (kernelBack → ядро зовёт onExit с очисткой).
+static const NavButton assistantNav[] = {
+    { "Exit", kernelBack },
+};
+
 const Program assistantProgram = {
     "AI Assistant", assistantEnter, assistantTick, nullptr, assistantIcon,
-    nullptr, 0, assistantKeepAwake, assistantExit
+    assistantNav, 1, assistantKeepAwake, assistantExit
 };

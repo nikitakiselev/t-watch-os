@@ -23,6 +23,7 @@ void  wifiRelease();
 bool  wifiActive();                // радио включено (для иконки в статусбаре)
 
 bool  wifiConnected();
+void  wifiReconnect();             // поднять линк заново после сна (async, если удержан)
 const char *wifiCurrentSsid();     // SSID текущего подключения ("" если нет)
 int   wifiRssi();                  // RSSI текущего подключения (dBm; -100 если нет связи)
 

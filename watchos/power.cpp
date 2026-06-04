@@ -2,6 +2,7 @@
 #include "hw.h"
 #include "input.h"
 #include "program.h"
+#include "wifi.h"
 #include <esp_sleep.h>
 #include <driver/gpio.h>
 
@@ -56,6 +57,7 @@ static void fullSleep()
     esp_light_sleep_start();       // ← здесь устройство стоит до нажатия кнопки
 
     // ── проснулись по кнопке ──
+    wifiReconnect();               // в light-sleep модем гас → поднять линк заново (async)
     watch->displayWakeup();
     delay(120);                    // ST7789 после sleep-out
     watch->power->clearIRQ();      // не считать кнопку-пробуждение за нажатие
