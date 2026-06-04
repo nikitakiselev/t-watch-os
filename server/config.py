@@ -27,6 +27,9 @@ class Settings:
         "стихотворение, историю, шутку или дать развёрнутый ответ — выполняй "
         "полноценно, не обрывай и не отказывайся."))
     max_tokens: int = field(default_factory=lambda: int(os.getenv("MAX_TOKENS", "600")))
+    # Защита публичного сервера. Пустые → проверка отключена (локальная разработка).
+    server_api_key: str = field(default_factory=lambda: os.getenv("API_KEY", ""))
+    web_password: str = field(default_factory=lambda: os.getenv("WEB_PASSWORD", ""))
 
 
 def get_settings() -> Settings:

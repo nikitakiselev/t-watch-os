@@ -1,3 +1,4 @@
+import base64
 from fastapi.testclient import TestClient
 from server import app as appmod
 
@@ -6,6 +7,44 @@ def make_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://h:8080")
     return TestClient(appmod.app)
+
+
+def _basic(password, user="admin"):
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+def test_talk_requires_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    monkeypatch.setattr(appmod.pipeline, "process_turn", lambda s, sid, a: "http://h/audio/x/0.mp3")
+    c = make_client(tmp_path, monkeypatch)
+    # без ключа → 401
+    r = c.post("/talk?session=x", content=b"\x00\x01")
+    assert r.status_code == 401
+    # с верным ключом → проходит
+    r = c.post("/talk?session=x", content=b"\x00\x01", headers={"X-API-Key": "secret123"})
+    assert r.status_code == 200
+    # с неверным ключом → 401
+    r = c.post("/talk?session=x", content=b"\x00\x01", headers={"X-API-Key": "nope"})
+    assert r.status_code == 401
+
+
+def test_index_requires_password_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEB_PASSWORD", "adminpass")
+    monkeypatch.setenv("API_KEY", "secret123")
+    c = make_client(tmp_path, monkeypatch)
+    # без авторизации → 401 + WWW-Authenticate
+    r = c.get("/")
+    assert r.status_code == 401
+    assert "Basic" in r.headers.get("www-authenticate", "")
+    # с верным паролем → 200, и ключ встроен в страницу
+    r = c.get("/", headers=_basic("adminpass"))
+    assert r.status_code == 200
+    assert "secret123" in r.text
+    assert "__API_KEY__" not in r.text
+    # с неверным паролем → 401
+    r = c.get("/", headers=_basic("wrong"))
+    assert r.status_code == 401
 
 
 def test_index_served(tmp_path, monkeypatch):

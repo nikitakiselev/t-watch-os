@@ -51,6 +51,7 @@
 <script>
 "use strict";
 const SR = 16000;
+const API_KEY = "__API_KEY__";   // подставляется сервером при отдаче страницы
 const micBtn  = document.getElementById("mic");
 const statusEl= document.getElementById("status");
 const logEl   = document.getElementById("log");
@@ -159,7 +160,7 @@ async function stopAndSend() {
   try {
     const resp = await fetch("/talk?session=" + encodeURIComponent(sessionId), {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
+      headers: { "Content-Type": "application/octet-stream", "X-API-Key": API_KEY },
       body: buffer
     });
     if (resp.status === 204) {

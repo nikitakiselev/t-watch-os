@@ -1,8 +1,8 @@
-import asyncio, logging, time
+import asyncio, base64, logging, secrets, time
 import re
 from pathlib import Path
 from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 from server import cleanup, pipeline
@@ -14,14 +14,38 @@ _SAFE = re.compile(r"^[A-Za-z0-9_-]+$")
 _INDEX = Path(__file__).resolve().parent / "static" / "index.html"
 
 
+def _basic_auth_ok(request: Request, password: str) -> bool:
+    # Любое имя пользователя, пароль == WEB_PASSWORD. Пустой пароль → проверка выключена.
+    if not password:
+        return True
+    header = request.headers.get("authorization", "")
+    if not header.startswith("Basic "):
+        return False
+    try:
+        _, _, given = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+    except Exception:
+        return False
+    return secrets.compare_digest(given, password)
+
+
 @app.get("/")
-def index():
-    return FileResponse(_INDEX, media_type="text/html")
+def index(request: Request):
+    settings = get_settings()
+    if not _basic_auth_ok(request, settings.web_password):
+        return Response(status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="assistant"'})
+    # API-ключ встраиваем в страницу, чтобы её JS мог авторизоваться на /talk.
+    html = _INDEX.read_text(encoding="utf-8").replace("__API_KEY__", settings.server_api_key)
+    return HTMLResponse(html)
 
 
 @app.post("/talk")
 async def talk(session: str, request: Request):
     settings = get_settings()
+    if settings.server_api_key:
+        given = request.headers.get("x-api-key", "")
+        if not secrets.compare_digest(given, settings.server_api_key):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
     audio_lpcm = await request.body()
     # process_turn блокирующий (STT+GPT+TTS, ~3-10 c) — уводим в пул потоков,
     # чтобы не вешать event loop (фоновую чистку, параллельные запросы).

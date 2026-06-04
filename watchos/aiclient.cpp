@@ -19,6 +19,20 @@ String aiServerUrl()
     return url;
 }
 
+// API-ключ — 2-я строка /ai_server.txt (1-я — URL). Пусто, если не задан.
+static String aiApiKey()
+{
+    String key;
+    File f = SPIFFS.open("/ai_server.txt", "r");
+    if (f) {
+        f.readStringUntil('\n');           // пропустить URL
+        key = f.readStringUntil('\n');     // ключ
+        f.close();
+        key.trim();
+    }
+    return key;
+}
+
 // Достать значение "url" из тела {"url":"https://..."} без JSON-зависимостей.
 static String extractUrl(const String &body)
 {
@@ -50,6 +64,8 @@ AiResult aiSend(const char *uuid, const int16_t *pcm, int samples)
     HTTPClient http;
     if (!http.begin(*client, url)) return r;
     http.addHeader("Content-Type", "application/octet-stream");
+    String key = aiApiKey();
+    if (key.length()) http.addHeader("X-API-Key", key);
     http.setTimeout(20000);                     // сервер STT+GPT+TTS ~5-10 c
 
     int code = http.POST((uint8_t *)pcm, (size_t)samples * sizeof(int16_t));
