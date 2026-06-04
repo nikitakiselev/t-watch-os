@@ -96,7 +96,47 @@ static void assistantIcon(TFT_eSPI &g, int cx, int cy, int r)
     g.drawFastVLine(cx, cy + r / 4, r / 4, COL_GREEN);
 }
 
+// Идёт ли сейчас палец по экрану (для hold-to-talk опрашиваем тач напрямую).
+static bool touchDown()
+{
+    int16_t x, y;
+    return watch->getTouch(x, y);
+}
+
+static void startRecording()
+{
+    if (!recBuf) { soundBeep(400, 120); return; }   // PSRAM не выделился — записывать некуда
+    if (!micCaptureBegin()) { soundBeep(400, 120); return; }
+    recSamples = 0;
+    state = ST_RECORDING;
+    drawScreen();
+}
+
+static void stopRecording()
+{
+    micCaptureEnd();
+    state = ST_IDLE;          // отправку добавит Task 5; пока возврат в IDLE
+    drawScreen();
+}
+
+static void assistantTick()
+{
+    if (state == ST_IDLE && touchDown()) {
+        startRecording();
+        return;
+    }
+    if (state == ST_RECORDING) {
+        if (recSamples < REC_CAP) {
+            int got = micCaptureRead(recBuf + recSamples, REC_CAP - recSamples);
+            recSamples += got;
+        }
+        if (!touchDown() || recSamples >= REC_CAP) {
+            stopRecording();
+        }
+    }
+}
+
 const Program assistantProgram = {
-    "AI Assistant", assistantEnter, nullptr, nullptr, assistantIcon,
+    "AI Assistant", assistantEnter, assistantTick, nullptr, assistantIcon,
     nullptr, 0, assistantKeepAwake, assistantExit
 };
