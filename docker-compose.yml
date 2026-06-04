@@ -1,0 +1,10 @@
+services:
+  assistant:
+    build: ./server
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./server/.env
+    volumes:
+      - ./server/data:/app/data
+    restart: unless-stopped
