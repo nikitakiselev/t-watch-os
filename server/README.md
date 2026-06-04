@@ -28,3 +28,18 @@ curl -s --data-binary @sample.pcm "http://localhost:8080/talk?session=test" | jq
 cd server && python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt && python -m pytest -v
 ```
+
+## Публикация образа в ghcr.io
+Из корня репозитория:
+```
+./build-push.sh           # тег = короткий git sha + latest
+./build-push.sh v1.0      # явный тег + latest
+```
+Собирает multi-arch образ (`linux/amd64,linux/arm64`) и пушит в
+`ghcr.io/nikitakiselev/twatch-assistant`. Логин берётся из `gh auth token`
+(нужен scope `write:packages`) либо из env `GHCR_TOKEN`. Деплой на сервере:
+```
+docker pull ghcr.io/nikitakiselev/twatch-assistant:latest
+```
+(пакет приватный по умолчанию — на сервере сделать `docker login ghcr.io` или
+переключить видимость пакета на public в настройках GitHub Packages).
