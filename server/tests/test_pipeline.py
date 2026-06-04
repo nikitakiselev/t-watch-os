@@ -45,6 +45,17 @@ def test_process_turn_includes_prior_context(tmp_path, monkeypatch):
     assert ("assistant", "приятно") in roles_texts
 
 
+def test_process_turn_strips_trailing_slash_in_base_url(tmp_path, monkeypatch):
+    s = Settings(api_key="K", folder_id="F", public_base_url="http://h:8080/",
+                 data_dir=tmp_path, system_prompt="s", max_tokens=10)
+    monkeypatch.setattr(pipeline.yandex, "stt_recognize", lambda a, **k: "хай")
+    monkeypatch.setattr(pipeline.yandex, "gpt_complete", lambda m, **k: "ок")
+    monkeypatch.setattr(pipeline.yandex, "tts_synthesize", lambda t, **k: b"O")
+    monkeypatch.setattr(pipeline.audio, "opus_to_mp3", lambda b: b"M")
+    url = pipeline.process_turn(s, "sid-9", b"x")
+    assert url == "http://h:8080/audio/sid-9/0.mp3"   # ровно один слэш
+
+
 def test_process_turn_empty_stt_skips(tmp_path, monkeypatch):
     s = Settings(data_dir=tmp_path)
     monkeypatch.setattr(pipeline.yandex, "stt_recognize", lambda a, **k: "   ")

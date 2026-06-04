@@ -33,6 +33,7 @@ def process_turn(settings: Settings, session_id: str, audio_lpcm: bytes):
 
     path = sessions.next_audio_path(settings.data_dir, session_id)
     path.write_bytes(mp3)
-    # В URL — реальное имя каталога (_safe_id), чтобы GET /audio нашёл файл,
-    # даже если session_id содержал бы символы, вычищенные при создании пути.
-    return f"{settings.public_base_url}/audio/{path.parent.name}/{path.name}"
+    # rstrip('/') — PUBLIC_BASE_URL может быть со слэшем на конце (иначе вышло бы '//audio').
+    # path.parent.name (== _safe_id) — чтобы GET /audio нашёл файл даже при «грязном» session_id.
+    base = settings.public_base_url.rstrip("/")
+    return f"{base}/audio/{path.parent.name}/{path.name}"

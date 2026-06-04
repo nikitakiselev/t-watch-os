@@ -182,15 +182,29 @@ async function stopAndSend() {
   }
 }
 
-function play(url) {
-  return new Promise((resolve) => {
-    setState("speaking");
-    const a = new Audio(url);
-    const done = () => { busy = false; setState("idle"); resolve(); };
-    a.onended = done;
-    a.onerror = () => { log("ошибка воспроизведения", "l-err"); done(); };
-    a.play().catch(() => { log("autoplay заблокирован — тапни кнопку и повтори", "l-err"); done(); });
-  });
+// Играем ответ через AudioContext (он уже разблокирован жестом записи) —
+// так обходим autoplay-политику HTMLAudioElement, которая блокирует play()
+// спустя несколько секунд после жеста.
+async function play(url) {
+  setState("speaking");
+  const done = () => { busy = false; setState("idle"); };
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const buf = await resp.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(buf);
+    await new Promise((resolve) => {
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(audioCtx.destination);
+      src.onended = resolve;
+      src.start();
+    });
+    done();
+  } catch (err) {
+    log("ошибка воспроизведения: " + err.message, "l-err");
+    done();
+  }
 }
 
 // ── ввод: hold-to-talk через Pointer Events (мышь + тач) ──
