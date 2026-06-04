@@ -8,10 +8,9 @@
 static char urls[MAX_STATIONS][URL_LEN];
 static int  count = 0;
 
-void stationsBegin()
+static void loadList()
 {
     count = 0;
-    if (!SPIFFS.begin(true)) return;          // true — отформатировать, если ФС нет
     File f = SPIFFS.open("/stations.txt", "r");
     if (!f) return;
     while (f.available() && count < MAX_STATIONS) {
@@ -23,6 +22,14 @@ void stationsBegin()
     }
     f.close();
 }
+
+void stationsBegin()
+{
+    if (!SPIFFS.begin(true)) return;          // true — отформатировать, если ФС нет
+    loadList();
+}
+
+void stationsReload() { loadList(); }         // перечитать после правки веб-редактором
 
 int stationsCount() { return count; }
 

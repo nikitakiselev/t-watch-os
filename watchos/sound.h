@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 // Сервис звука: интернет-радио через ESP32-audioI2S. Объектом Audio владеет
 // отдельная FreeRTOS-задача (декодеру нужно постоянное обслуживание), команды
@@ -10,6 +11,11 @@ void  audioSetVolume(int vol);         // 0..21
 int   audioVolume();
 bool  audioIsPlaying();
 const char *audioTitle();              // ICY stream title ("" если нет)
+
+// Спектр: последние SPEC_N сэмплов моно-микса из декодера (для FFT-анализатора радио).
+#define SPEC_N 64
+void     audioSpectrumCopy(int16_t *out);  // копирует SPEC_N сэмплов (старые→новые)
+uint32_t audioSampleRate();                // частота дискретизации текущего потока (0, если нет)
 
 // Короткий beep через I2S (игровые эффекты). Блокирует на durMs.
 // Использовать, когда радио не играет (напр. в игре).

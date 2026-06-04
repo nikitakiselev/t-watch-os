@@ -7,6 +7,18 @@ void drawGrid()
     for (int y = 0; y <= SCR_H; y += 24) tft->drawFastHLine(0, y, SCR_W, COL_GRID);
 }
 
+// Точки-индикатор страниц (свайп влево/вправо): активная — яркая, прочие — тусклые.
+void drawPageDots(int count, int current, int y)
+{
+    if (count < 2) return;
+    const int spacing = 12, r = 2;
+    int total = (count - 1) * spacing;
+    int x0 = SCR_W / 2 - total / 2;
+    tft->fillRect(x0 - r - 2, y - r - 2, total + 2 * r + 4, 2 * r + 4, COL_BG);
+    for (int i = 0; i < count; i++)
+        tft->fillCircle(x0 + i * spacing, y, r, i == current ? COL_GREEN_HI : COL_GREEN_DIM);
+}
+
 void drawHudFrame()
 {
     const int m = 2, L = 16;

@@ -6,6 +6,5 @@ https://uk3.internet-radio.com/proxy/1940sradio?mp=/stream
 https://us4.internet-radio.com/proxy/radioestiloleblon?mp=/stream;
 https://us2.internet-radio.com/proxy/megatoncafe?mp=/stream;
 https://us1.internet-radio.com/proxy/xrds?mp=/stream;
-https://us3.internet-radio.com/proxy/topblues?mp=/stream;
 https://uk7.internet-radio.com/proxy/ukvibes?mp=/stream;
 https://uk7.internet-radio.com/proxy/movedahouse?mp=/stream;

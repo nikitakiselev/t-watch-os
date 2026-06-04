@@ -26,6 +26,10 @@ void themeBackdrop();                 // базовый фон: заливка +
 void drawGrid();                      // сетка (приложение вызывает само, если нужна)
 void drawHudFrame();                  // угловые HUD-скобки
 
+// Индикатор страниц для экранов с листанием влево/вправо: count точек по центру на
+// высоте y; активная (current) — яркая. Правило для всех свайп-страничных экранов.
+void drawPageDots(int count, int current, int y);
+
 // ASCII-арт: массив строк, отцентрован по (cx,cy). Моноширинный font 1, масштаб size.
 // Цель g — экран (*tft) или спрайт (наследует TFT_eSPI).
 void drawAsciiArt(TFT_eSPI &g, const char *const *lines, int n,

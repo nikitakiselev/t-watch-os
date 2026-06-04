@@ -34,6 +34,23 @@ void audio_showstreamtitle(const char *info)
     title[sizeof(title) - 1] = 0;
 }
 
+// ─── Захват PCM для спектроанализатора. Библиотека (Audio.cpp/playSample) зовёт
+//     audio_pcm_tap на каждый ~4-й сэмпл моно-микса; складываем в кольцевой буфер. ───
+static volatile int16_t  capBuf[SPEC_N];
+static volatile uint16_t capPos = 0;
+
+void audio_pcm_tap(int16_t mono)
+{
+    capBuf[capPos] = mono;
+    capPos = (capPos + 1) % SPEC_N;
+}
+
+void audioSpectrumCopy(int16_t *out)        // старые → новые, начиная с текущей позиции записи
+{
+    uint16_t p = capPos;
+    for (int i = 0; i < SPEC_N; i++) out[i] = capBuf[(p + i) % SPEC_N];
+}
+
 static void audioTask(void *)
 {
     for (;;) {
@@ -82,6 +99,7 @@ void audioSetVolume(int v)
 int  audioVolume()    { return volume; }
 bool audioIsPlaying() { return playing; }
 const char *audioTitle() { return title; }
+uint32_t audioSampleRate() { return audio.getSampleRate(); }
 
 // Проиграть короткий звук из SPIFFS (wav/mp3). Возвращает false, если файла нет
 // (вызывающий может сыграть beep-фоллбэк). Воспроизведение асинхронное (задачей).
