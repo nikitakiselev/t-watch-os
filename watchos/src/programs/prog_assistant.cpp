@@ -160,7 +160,7 @@ static void stopRecording()
 
     if (res.code == 200 && res.url.length() > 0) {
         audioSetVolume(18);
-        audioStart(res.url.c_str());       // connecttohost (https) — асинхронно
+        audioStart(res.url.c_str());       // connecttohost (http/https) — асинхронно
         speakStartMs = millis();
         playStarted  = false;
         state = ST_SPEAKING;

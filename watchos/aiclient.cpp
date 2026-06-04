@@ -3,7 +3,7 @@
 #include <WiFiClientSecure.h>
 #include <SPIFFS.h>
 
-static const char *DEFAULT_SERVER = "https://twatch.nikitakiselev.ru";
+static const char *DEFAULT_SERVER = "http://twatch.nikitakiselev.ru";
 
 String aiServerUrl()
 {
@@ -37,12 +37,18 @@ AiResult aiSend(const char *uuid, const int16_t *pcm, int samples)
 {
     AiResult r = { 0, "" };
 
-    WiFiClientSecure client;
-    client.setInsecure();                       // сертификат не проверяем (как в connecttohost)
+    String url = aiServerUrl() + "/talk?session=" + uuid;
+
+    // Scheme-aware: для http:// — обычный WiFiClient (без TLS, без mbedTLS-кучи).
+    // TLS на ESP32 жрёт ~32 КБ, а аудио-библиотека держит свой TLS-контекст после
+    // HTTPS-плейбека → два контекста не влезают. На LAN-HTTP проблема исчезает.
+    WiFiClient       plain;
+    WiFiClientSecure secure;
+    WiFiClient      *client = &plain;
+    if (url.startsWith("https://")) { secure.setInsecure(); client = &secure; }
 
     HTTPClient http;
-    String url = aiServerUrl() + "/talk?session=" + uuid;
-    if (!http.begin(client, url)) return r;
+    if (!http.begin(*client, url)) return r;
     http.addHeader("Content-Type", "application/octet-stream");
     http.setTimeout(20000);                     // сервер STT+GPT+TTS ~5-10 c
 
