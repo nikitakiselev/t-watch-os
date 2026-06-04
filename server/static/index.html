@@ -37,16 +37,72 @@
   .l-sys { color:var(--dim); }
   .l-err { color:#ff6666; }
   .hint { font-size:11px; color:var(--dim); text-align:center; max-width:520px; }
+
+  /* ── tab bar ── */
+  #tabbar { display:flex; gap:8px; }
+  #tabbar button { font:inherit; font-size:13px; background:none; color:var(--dim);
+                   border:1px solid var(--frame); border-radius:4px; padding:5px 18px;
+                   cursor:pointer; letter-spacing:.5px; transition:all .1s; }
+  #tabbar button.active { color:var(--amber); border-color:var(--amber); background:#150f00; }
+  #tabbar button:not(.active):hover { color:var(--green); border-color:var(--green); }
+
+  /* ── sessions view ── */
+  #view-sessions { width:100%; max-width:520px; display:flex; flex-direction:column; gap:12px; }
+  #sess-header { display:flex; align-items:center; gap:10px; }
+  #sess-refresh { font:inherit; font-size:11px; background:none; color:var(--dim);
+                  border:1px solid var(--frame); border-radius:4px; padding:3px 10px; cursor:pointer; }
+  #sess-refresh:hover { color:var(--green); border-color:var(--green); }
+  #sess-hint { font-size:11px; color:var(--dim); }
+  #sess-list { border:1px solid var(--frame); border-radius:6px; background:#060a06;
+               min-height:60px; overflow-y:auto; max-height:220px; }
+  .sess-row { display:flex; align-items:center; gap:12px; padding:7px 10px;
+              border-bottom:1px solid var(--frame); cursor:pointer; font-size:12px;
+              transition:background .1s; }
+  .sess-row:last-child { border-bottom:none; }
+  .sess-row:hover { background:#0d1a0d; }
+  .sess-row.selected { background:#0d1a0d; color:var(--amber); }
+  .sess-id   { flex:1; color:var(--green); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sess-audio { color:var(--dim); white-space:nowrap; }
+  .sess-time  { color:var(--dim); font-size:11px; white-space:nowrap; }
+  #sess-detail { border:1px solid var(--frame); border-radius:6px; background:#060a06;
+                 padding:10px; font-size:12px; line-height:1.6;
+                 user-select:text; -webkit-user-select:text; }
+  .sd-id { color:var(--dim); font-size:11px; margin-bottom:8px;
+           user-select:text; -webkit-user-select:text; word-break:break-all; }
+  .sd-turn { margin:3px 0; }
+  .sd-turn.user { color:var(--green); }
+  .sd-turn.bot  { color:var(--amber); }
+  .sd-audio-wrap { margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+  .sd-audio-label { font-size:11px; color:var(--dim); margin-bottom:2px; }
+  audio { width:100%; filter:invert(1) hue-rotate(90deg) brightness(.8); }
+  .sess-empty { padding:12px; color:var(--dim); font-size:12px; }
 </style>
 </head>
 <body>
   <h1>[ AI ASSISTANT · DEBUG ]</h1>
-  <div id="session">session: <span id="sid">—</span><button id="newSession">new</button></div>
-  <button id="mic">hold&nbsp;to&nbsp;talk</button>
-  <div id="status">idle</div>
-  <div id="logbar"><button id="copyLog">copy log</button><button id="clearLog">clear</button></div>
-  <div id="log" aria-live="polite"></div>
-  <div class="hint">Зажми кнопку и говори, отпусти — отправится. Нужен доступ к микрофону и HTTPS либо localhost.</div>
+
+  <div id="tabbar">
+    <button id="tab-talk" class="active">Talk</button>
+    <button id="tab-sessions">Sessions</button>
+  </div>
+
+  <div id="view-talk" style="display:contents">
+    <div id="session">session: <span id="sid">—</span><button id="newSession">new</button></div>
+    <button id="mic">hold&nbsp;to&nbsp;talk</button>
+    <div id="status">idle</div>
+    <div id="logbar"><button id="copyLog">copy log</button><button id="clearLog">clear</button></div>
+    <div id="log" aria-live="polite"></div>
+    <div class="hint">Зажми кнопку и говори, отпусти — отправится. Нужен доступ к микрофону и HTTPS либо localhost.</div>
+  </div>
+
+  <div id="view-sessions" hidden>
+    <div id="sess-header">
+      <button id="sess-refresh">↻ refresh</button>
+      <span id="sess-hint" class="hint">click a session to view its transcript and audio</span>
+    </div>
+    <div id="sess-list"><div class="sess-empty">loading…</div></div>
+    <div id="sess-detail"><div class="sess-empty" style="color:var(--dim)">select a session above</div></div>
+  </div>
 
 <script>
 "use strict";
@@ -255,6 +311,128 @@ document.getElementById("newSession").addEventListener("click", () => {
 });
 
 log("session " + sessionId, "l-sys");
+
+// ── Sessions tab ──────────────────────────────────────────────────────────────
+
+const viewTalk     = document.getElementById("view-talk");
+const viewSessions = document.getElementById("view-sessions");
+const tabTalk      = document.getElementById("tab-talk");
+const tabSessions  = document.getElementById("tab-sessions");
+const sessList     = document.getElementById("sess-list");
+const sessDetail   = document.getElementById("sess-detail");
+
+function switchTab(name) {
+  if (name === "talk") {
+    viewTalk.hidden     = false;
+    viewSessions.hidden = true;
+    tabTalk.classList.add("active");
+    tabSessions.classList.remove("active");
+  } else {
+    viewTalk.hidden     = true;
+    viewSessions.hidden = false;
+    tabTalk.classList.remove("active");
+    tabSessions.classList.add("active");
+    loadSessions();
+  }
+}
+
+tabTalk.addEventListener("click",     () => switchTab("talk"));
+tabSessions.addEventListener("click", () => switchTab("sessions"));
+
+async function loadSessions() {
+  sessList.innerHTML = '<div class="sess-empty">loading…</div>';
+  try {
+    const resp = await fetch("/sessions", { headers: { "X-API-Key": API_KEY } });
+    if (!resp.ok) {
+      sessList.innerHTML = '<div class="sess-empty l-err">' + resp.status + " — нет доступа</div>";
+      return;
+    }
+    const data = await resp.json();
+    const list = data.sessions || [];
+    if (list.length === 0) {
+      sessList.innerHTML = '<div class="sess-empty">no sessions yet</div>';
+      return;
+    }
+    sessList.innerHTML = "";
+    for (const s of list) {
+      const row = document.createElement("div");
+      row.className = "sess-row";
+      row.dataset.id = s.id;
+
+      const shortId  = s.id.slice(0, 8) + "…";
+      const audioTxt = (s.audio || 0) + " 🔊";
+      const timeTxt  = new Date(s.mtime * 1000).toLocaleString();
+
+      row.innerHTML =
+        '<span class="sess-id">'    + shortId  + '</span>' +
+        '<span class="sess-audio">' + audioTxt + '</span>' +
+        '<span class="sess-time">'  + timeTxt  + '</span>';
+
+      row.addEventListener("click", () => {
+        document.querySelectorAll(".sess-row").forEach(r => r.classList.remove("selected"));
+        row.classList.add("selected");
+        openSession(s.id);
+      });
+      sessList.appendChild(row);
+    }
+  } catch (err) {
+    sessList.innerHTML = '<div class="sess-empty l-err">ошибка: ' + err.message + '</div>';
+  }
+}
+
+async function openSession(id) {
+  sessDetail.innerHTML = '<div class="sess-empty">loading…</div>';
+  try {
+    const resp = await fetch("/sessions/" + encodeURIComponent(id), {
+      headers: { "X-API-Key": API_KEY }
+    });
+    if (!resp.ok) {
+      sessDetail.innerHTML = '<div class="sess-empty l-err">' + resp.status + " — нет доступа</div>";
+      return;
+    }
+    const data = await resp.json();
+    sessDetail.innerHTML = "";
+
+    const idLine = document.createElement("div");
+    idLine.className = "sd-id";
+    idLine.textContent = "session: " + data.id;
+    sessDetail.appendChild(idLine);
+
+    const turns = data.turns || [];
+    for (const t of turns) {
+      const div = document.createElement("div");
+      div.className = "sd-turn " + (t.role === "user" ? "user" : "bot");
+      div.textContent = (t.role === "user" ? "▶ you: " : "◀ bot: ") + t.text;
+      sessDetail.appendChild(div);
+    }
+
+    const audioFiles = data.audio || [];
+    if (audioFiles.length > 0) {
+      const wrap = document.createElement("div");
+      wrap.className = "sd-audio-wrap";
+      for (const filename of audioFiles) {
+        const lbl = document.createElement("div");
+        lbl.className = "sd-audio-label";
+        lbl.textContent = filename;
+        const player = document.createElement("audio");
+        player.controls = true;
+        player.src = "/audio/" + encodeURIComponent(id) + "/" + filename;
+        wrap.appendChild(lbl);
+        wrap.appendChild(player);
+      }
+      sessDetail.appendChild(wrap);
+    } else if (turns.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "sess-empty";
+      empty.textContent = "empty session";
+      sessDetail.appendChild(empty);
+    }
+  } catch (err) {
+    sessDetail.innerHTML = '<div class="sess-empty l-err">ошибка: ' + err.message + '</div>';
+  }
+}
+
+document.getElementById("sess-refresh").addEventListener("click", loadSessions);
 </script>
 </body>
 </html>

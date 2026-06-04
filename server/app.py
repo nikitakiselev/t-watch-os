@@ -5,13 +5,20 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
-from server import cleanup, pipeline
+from server import cleanup, pipeline, sessions
 from server.config import get_settings
 
 app = FastAPI(title="watchos AI assistant")
 
 _SAFE = re.compile(r"^[A-Za-z0-9_-]+$")
 _INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+def _api_key_ok(request: Request, settings) -> bool:
+    # Пустой ключ → проверка выключена (локальная разработка).
+    if not settings.server_api_key:
+        return True
+    return secrets.compare_digest(request.headers.get("x-api-key", ""), settings.server_api_key)
 
 
 def _basic_auth_ok(request: Request, password: str) -> bool:
@@ -42,10 +49,8 @@ def index(request: Request):
 @app.post("/talk")
 async def talk(session: str, request: Request):
     settings = get_settings()
-    if settings.server_api_key:
-        given = request.headers.get("x-api-key", "")
-        if not secrets.compare_digest(given, settings.server_api_key):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
     audio_lpcm = await request.body()
     # process_turn блокирующий (STT+GPT+TTS, ~3-10 c) — уводим в пул потоков,
     # чтобы не вешать event loop (фоновую чистку, параллельные запросы).
@@ -72,6 +77,26 @@ def audio(session_id: str, name: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(path, media_type="audio/mpeg")
+
+
+@app.get("/sessions")
+def sessions_list(request: Request):
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return JSONResponse({"sessions": sessions.list_sessions(settings.data_dir)})
+
+
+@app.get("/sessions/{sid}")
+def session_detail(sid: str, request: Request):
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if not _SAFE.match(sid):
+        raise HTTPException(status_code=400, detail="bad id")
+    turns = [{"role": r, "text": t} for r, t in sessions.read_history(settings.data_dir, sid)]
+    return JSONResponse({"id": sid, "turns": turns,
+                         "audio": sessions.list_audio(settings.data_dir, sid)})
 
 
 @app.on_event("startup")

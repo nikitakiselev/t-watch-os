@@ -56,6 +56,36 @@ def test_index_served(tmp_path, monkeypatch):
     assert "AudioContext" in r.text     # шлёт сырой LPCM через WebAudio
 
 
+def test_sessions_list_and_detail(tmp_path, monkeypatch):
+    from server import sessions
+    sessions.append_turn(tmp_path, "sid-1", "user", "привет")
+    sessions.append_turn(tmp_path, "sid-1", "bot", "здравствуй")
+    (tmp_path / "audio" / "sid-1").mkdir(parents=True)
+    (tmp_path / "audio" / "sid-1" / "0.mp3").write_bytes(b"M")
+    c = make_client(tmp_path, monkeypatch)
+
+    r = c.get("/sessions")
+    assert r.status_code == 200
+    ids = [s["id"] for s in r.json()["sessions"]]
+    assert "sid-1" in ids
+    assert next(s for s in r.json()["sessions"] if s["id"] == "sid-1")["audio"] == 1
+
+    r = c.get("/sessions/sid-1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["turns"] == [{"role": "user", "text": "привет"},
+                             {"role": "bot", "text": "здравствуй"}]
+    assert body["audio"] == ["0.mp3"]
+
+
+def test_sessions_require_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    c = make_client(tmp_path, monkeypatch)
+    assert c.get("/sessions").status_code == 401
+    assert c.get("/sessions", headers={"X-API-Key": "secret123"}).status_code == 200
+    assert c.get("/sessions/anything", headers={"X-API-Key": "secret123"}).status_code == 200
+
+
 def test_talk_returns_url(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod.pipeline, "process_turn",
                         lambda s, sid, audio: "http://h:8080/audio/x/0.mp3")

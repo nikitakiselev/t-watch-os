@@ -48,3 +48,29 @@ def next_audio_path(data_dir: Path, session_id: str) -> Path:
     d = audio_dir(data_dir, session_id)
     n = len(list(d.glob("*.mp3")))
     return d / f"{n}.mp3"
+
+
+def _mp3_sort_key(name: str) -> int:
+    stem = name.split(".")[0]
+    return int(stem) if stem.isdigit() else 0
+
+
+def list_audio(data_dir: Path, session_id: str) -> list[str]:
+    d = data_dir / "audio" / _safe_id(session_id)
+    if not d.is_dir():
+        return []
+    return sorted((p.name for p in d.glob("*.mp3")), key=_mp3_sort_key)
+
+
+def list_sessions(data_dir: Path) -> list[dict]:
+    d = _sessions_dir(data_dir)
+    if not d.is_dir():
+        return []
+    files = sorted(d.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    out = []
+    for f in files:
+        sid = f.stem
+        out.append({"id": sid,
+                    "audio": len(list_audio(data_dir, sid)),
+                    "mtime": f.stat().st_mtime})
+    return out
