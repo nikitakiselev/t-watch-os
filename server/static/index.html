@@ -25,9 +25,14 @@
   #mic.play  { border-color:#33ccff; color:#33ccff; }
   #mic:disabled { opacity:.6; cursor:default; }
   #status { font-size:14px; min-height:18px; color:var(--amber); }
+  #logbar { width:100%; max-width:520px; display:flex; gap:8px; justify-content:flex-end; }
+  #logbar button { font:inherit; font-size:11px; background:none; color:var(--dim);
+                   border:1px solid var(--frame); border-radius:4px; padding:3px 8px; cursor:pointer; }
+  #logbar button:active { color:var(--green); border-color:var(--green); }
   #log { width:100%; max-width:520px; flex:1; min-height:120px; overflow-y:auto;
          border:1px solid var(--frame); border-radius:6px; padding:8px;
-         font-size:12px; line-height:1.5; background:#060a06; }
+         font-size:12px; line-height:1.5; background:#060a06;
+         user-select:text; -webkit-user-select:text; cursor:text; white-space:pre-wrap; }
   .l-me  { color:var(--green); }
   .l-sys { color:var(--dim); }
   .l-err { color:#ff6666; }
@@ -39,6 +44,7 @@
   <div id="session">session: <span id="sid">—</span><button id="newSession">new</button></div>
   <button id="mic">hold&nbsp;to&nbsp;talk</button>
   <div id="status">idle</div>
+  <div id="logbar"><button id="copyLog">copy log</button><button id="clearLog">clear</button></div>
   <div id="log" aria-live="polite"></div>
   <div class="hint">Зажми кнопку и говори, отпусти — отправится. Нужен доступ к микрофону и HTTPS либо localhost.</div>
 
@@ -68,7 +74,7 @@ function newId() {
 function log(msg, cls) {
   const d = document.createElement("div");
   d.className = cls || "l-sys";
-  d.textContent = msg;
+  d.textContent = new Date().toLocaleTimeString() + "  " + msg;
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -207,6 +213,25 @@ function endHold(e) {
 }
 micBtn.addEventListener("pointerup", endHold);
 micBtn.addEventListener("pointercancel", endHold);
+
+const copyBtn = document.getElementById("copyLog");
+copyBtn.addEventListener("click", async () => {
+  const txt = logEl.innerText;
+  try {
+    await navigator.clipboard.writeText(txt);
+    const old = copyBtn.textContent;
+    copyBtn.textContent = "copied!";
+    setTimeout(() => { copyBtn.textContent = old; }, 1200);
+  } catch (_) {
+    // clipboard недоступен (не HTTPS/localhost) — выделяем лог, чтобы скопировать вручную
+    const r = document.createRange();
+    r.selectNodeContents(logEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+});
+document.getElementById("clearLog").addEventListener("click", () => { logEl.textContent = ""; });
 
 document.getElementById("newSession").addEventListener("click", () => {
   sessionId = newId();
