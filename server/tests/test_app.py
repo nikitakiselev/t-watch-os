@@ -27,6 +27,16 @@ def test_talk_returns_url(tmp_path, monkeypatch):
     assert r.json() == {"url": "http://h:8080/audio/x/0.mp3"}
 
 
+def test_talk_pipeline_error_returns_502(tmp_path, monkeypatch):
+    def boom(s, sid, audio):
+        raise RuntimeError("yandex down")
+    monkeypatch.setattr(appmod.pipeline, "process_turn", boom)
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/talk?session=x", content=b"\x00\x01")
+    assert r.status_code == 502
+    assert "yandex down" in r.json()["error"]
+
+
 def test_talk_empty_recording_returns_204(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod.pipeline, "process_turn", lambda s, sid, audio: None)
     c = make_client(tmp_path, monkeypatch)

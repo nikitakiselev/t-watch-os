@@ -25,7 +25,12 @@ async def talk(session: str, request: Request):
     audio_lpcm = await request.body()
     # process_turn блокирующий (STT+GPT+TTS, ~3-10 c) — уводим в пул потоков,
     # чтобы не вешать event loop (фоновую чистку, параллельные запросы).
-    url = await run_in_threadpool(pipeline.process_turn, settings, session, audio_lpcm)
+    try:
+        url = await run_in_threadpool(pipeline.process_turn, settings, session, audio_lpcm)
+    except Exception as e:
+        # Сбой Yandex/ffmpeg (плохой ключ, сеть, квота) — отдаём причину, а не сырой 500.
+        logging.getLogger(__name__).exception("talk failed")
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=502)
     if url is None:
         return Response(status_code=204)
     return JSONResponse({"url": url})
