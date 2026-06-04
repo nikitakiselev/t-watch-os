@@ -27,6 +27,33 @@ static const uint32_t SPEAK_CONNECT_TIMEOUT_MS = 10000;   // не заиграл
 
 // Кнопка-микрофон в центре экрана.
 static const int BTN_CX = SCR_W / 2, BTN_CY = 116, BTN_R = 66;
+static const int INFO_Y = CONTENT_BOTTOM - 14;     // строка под кнопкой (громкость / секунды)
+
+// Громкость воспроизведения ответа (0..21, как у радио). Меняется кнопками Vol-/Vol+.
+static int aiVolume = 16;
+
+static void drawVolume()
+{
+    const int bw = 130, bx = (SCR_W - bw) / 2, bh = 8;
+    tft->fillRect(0, INFO_Y - 8, SCR_W, 18, COL_BG);
+    tft->setTextDatum(MR_DATUM);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    tft->drawString("VOL", bx - 6, INFO_Y, 1);
+    tft->drawRect(bx, INFO_Y - bh / 2, bw, bh, COL_FRAME);
+    int fill = (bw - 2) * aiVolume / 21;
+    if (fill > 0) tft->fillRect(bx + 1, INFO_Y - bh / 2 + 1, fill, bh - 2, COL_GREEN);
+}
+
+static void volStep(int d)
+{
+    aiVolume += d;
+    if (aiVolume < 0)  aiVolume = 0;
+    if (aiVolume > 21) aiVolume = 21;
+    audioSetVolume(aiVolume);        // применяется и к текущему воспроизведению
+    drawVolume();
+}
+static void volUp()   { volStep(+2); }
+static void volDown() { volStep(-2); }
 
 static void genSession()
 {
@@ -87,8 +114,11 @@ static void drawScreen()
         tft->drawString("no wifi", SCR_W / 2, BTN_CY, 4);
         break;
     }
+    if (state != ST_RECORDING && state != ST_NOWIFI) drawVolume();   // в записи тут счётчик секунд
 }
 
+// onEnter — только при настоящем входе (kernelOpen/возврат), НЕ на пробуждении:
+// пробуждение идёт через onResume (ядро). Поэтому здесь честно один acquire/genSession.
 static void assistantEnter()
 {
     wifiAcquire();
@@ -106,6 +136,13 @@ static void assistantEnter()
     if (!recBuf) recBuf = (int16_t *)ps_malloc((size_t)REC_CAP * sizeof(int16_t));
     state = ST_IDLE;
     recSamples = 0;
+    drawScreen();
+}
+
+// Пробуждение из сна: только перерисовать текущий экран — ресурсы (Wi-Fi, буфер,
+// сессия) живы, повторно их не трогаем. Wi-Fi после сна поднимет авто-reconnect ОС.
+static void assistantResume()
+{
     drawScreen();
 }
 
@@ -169,7 +206,7 @@ static void stopRecording()
     AiResult res = aiSend(sessionId, recBuf, recSamples);   // блокирует ~5-10 c
 
     if (res.code == 200 && res.url.length() > 0) {
-        audioSetVolume(18);
+        audioSetVolume(aiVolume);
         audioStart(res.url.c_str());       // connecttohost (http/https) — асинхронно
         speakStartMs = millis();
         playStarted  = false;
@@ -200,10 +237,10 @@ static void assistantTick()
             lastSec = sec;
             char b[8];
             snprintf(b, sizeof(b), "%ds", sec);
-            tft->fillRect(BTN_CX - 30, BTN_CY + BTN_R + 6, 60, 20, COL_BG);
+            tft->fillRect(0, INFO_Y - 9, SCR_W, 20, COL_BG);   // та же строка, что и бар громкости
             tft->setTextDatum(MC_DATUM);
             tft->setTextColor(COL_AMBER, COL_BG);
-            tft->drawString(b, BTN_CX, BTN_CY + BTN_R + 14, 2);
+            tft->drawString(b, BTN_CX, INFO_Y, 2);
         }
         if (!touchDown() || recSamples >= REC_CAP) {
             stopRecording();
@@ -219,12 +256,14 @@ static void assistantTick()
     }
 }
 
-// Нижняя панель: одна кнопка «Exit» (kernelBack → ядро зовёт onExit с очисткой).
+// Нижняя панель: Exit (выход с очисткой) + регулировка громкости ответа.
 static const NavButton assistantNav[] = {
     { "Exit", kernelBack },
+    { "Vol-", volDown },
+    { "Vol+", volUp },
 };
 
 const Program assistantProgram = {
     "AI Assistant", assistantEnter, assistantTick, nullptr, assistantIcon,
-    assistantNav, 1, assistantKeepAwake, assistantExit
+    assistantNav, 3, assistantKeepAwake, assistantExit, assistantResume
 };

@@ -54,6 +54,7 @@ void wifiAcquire()
 {
     if (refCount++ == 0) {
         WiFi.mode(WIFI_STA);
+        WiFi.setAutoReconnect(true);   // ОС сама поднимет линк после light-sleep (модем гас)
         WiFi.disconnect(false);
     }
 }
@@ -69,13 +70,6 @@ void wifiRelease()
 
 bool wifiActive()    { return refCount > 0; }
 bool wifiConnected() { return WiFi.status() == WL_CONNECTED; }
-
-// Поднять линк заново (после light-sleep модем гаснет, ассоциация теряется).
-// Только если Wi-Fi кем-то удержан. Async — не блокирует.
-void wifiReconnect()
-{
-    if (refCount > 0) WiFi.reconnect();
-}
 
 const char *wifiCurrentSsid()
 {

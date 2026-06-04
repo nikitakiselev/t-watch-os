@@ -43,6 +43,17 @@ void kernelRedraw()
     navbarDraw(p);
 }
 
+// Пробуждение из сна: перерисовать БЕЗ повторной настройки ресурсов. Зовём
+// onResume, если задан (лёгкая перерисовка), иначе — onEnter (как раньше).
+void kernelResume()
+{
+    const Program *p = kernelCurrent();
+    if (!p) return;
+    if (p->onResume)      p->onResume();
+    else if (p->onEnter)  p->onEnter();
+    navbarDraw(p);
+}
+
 const Program *kernelCurrent()
 {
     return (top >= 0) ? stack[top] : nullptr;
