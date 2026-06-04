@@ -14,7 +14,10 @@
 
 ## Железо (ключевое)
 
-- **Микрофон: PDM**, data `IO2`, clock `IO0`. Читается через I2S0 в режиме PDM RX.
+- **Микрофон: PDM**, data `GPIO2`, clock `GPIO0`. Читается через I2S0 в режиме
+  PDM RX. Подтверждено офиц. примером
+  `TTGO_TWatch_Library/examples/BasicUnit/TwatcV3Special/Microphone/Microphone.ino`
+  и докой `docs/watch_2020_v3.md`.
 - **Вывод звука:** MAX98357A по I2S0 (BCK 26 / WS 25 / DOUT 33) — уже используется
   модулем `sound.{h,cpp}` (радио, beep).
 - **I2S0 общий** для входа (PDM RX) и выхода (TX). Запись и воспроизведение
@@ -74,12 +77,39 @@ playback не стартовал) → короткий `soundBeep` + возвр�
 Добавляются функции (живут рядом с аудио-задачей, владеющей I2S0; паттерн как у
 `soundBeep`: приостановить аудио-задачу → переконфигурить I2S0 → восстановить):
 - `bool micCaptureBegin();` — suspend аудио-задачи, `i2s_driver_uninstall(I2S0)`,
-  установка I2S0 в **PDM RX** (clk IO0, data IO2, 16 кГц, 16 бит, моно). Возвращает
-  false при неудаче.
+  установка I2S0 в **PDM RX** (см. конфиг ниже). Возвращает false при неудаче.
 - `int micCaptureRead(int16_t* dst, int maxSamples);` — неблокирующе выгрести
-  доступные сэмплы (вызывается каждый тик в `RECORDING`).
-- `void micCaptureEnd();` — `i2s_driver_uninstall(I2S0)`, вернуть I2S0 в TX через
-  `audio.setPinout(...)` + `audio.setVolume(...)`, resume аудио-задачи.
+  доступные сэмплы через `i2s_read` (вызывается каждый тик в `RECORDING`).
+- `void micCaptureEnd();` — `i2s_driver_uninstall(I2S0)`, вернуть I2S0 в TX,
+  resume аудио-задачи.
+
+Конкретный конфиг PDM RX (из офиц. примера, но 16 кГц вместо 44.1):
+```c
+#define MIC_DATA  2     // GPIO2 — PDM data
+#define MIC_CLOCK 0     // GPIO0 — PDM clock (на ws_io_num)
+i2s_config_t cfg = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM),
+    .sample_rate = 16000,                         // STT: 16 кГц LPCM моно
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 2, .dma_buf_len = 128,
+};
+i2s_pin_config_t pin = { .bck_io_num = I2S_PIN_NO_CHANGE,
+    .ws_io_num = MIC_CLOCK, .data_out_num = I2S_PIN_NO_CHANGE, .data_in_num = MIC_DATA };
+i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+i2s_set_pin(I2S_NUM_0, &pin);
+i2s_set_clk(I2S_NUM_0, 16000, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+```
+
+**Риск восстановления I2S0 TX:** библиотека `ESP32-audioI2S` ставит свой I2S-драйвер
+сама (в конструкторе/`setPinout`). После записи `setPinout(...)` может оказаться
+недостаточно — возможно, нужна повторная установка драйвера в TX-конфигурации.
+Проверить по внутренностям библиотеки при реализации; при необходимости — хранить
+исходный TX-конфиг и переустанавливать драйвер в `micCaptureEnd`. Если 16 кГц на
+PDM-входе даст артефакты — фоллбэк: писать на 44.1 кГц и даунсемплить до 16 кГц
+программно.
 
 Буфер записи (`int16_t*` в PSRAM, `ps_malloc`) живёт в `prog_assistant`; размер на
 ~15 c при 16 кГц/16 бит/моно ≈ 480 КБ.
