@@ -1,10 +1,11 @@
 #include "savegame.h"
 #include "player.h"
 #include "inventory.h"
+#include "worldgen.h"
 #include <Preferences.h>
 #include <string.h>
 
-#define SAVE_MAGIC 0x44554E33u    // 'DUN3' — бампать при смене формата
+#define SAVE_MAGIC 0x44554E41u    // DUNA — цена 32-бит + масштаб снаряжения по глубине — бампать при смене формата
 
 struct SaveBlob {
     uint32_t magic;
@@ -15,6 +16,7 @@ struct SaveBlob {
     bool     hasWeapon, hasArmor;
     int32_t  px, py, campX, campY;
     bool     hasCamp;
+    int32_t  floor;
 };
 
 static Preferences prefs;
@@ -37,6 +39,7 @@ void gameSave(int32_t px, int32_t py, int32_t campX, int32_t campY, bool hasCamp
     s.equWeapon = equWeapon; s.equArmor = equArmor;
     s.hasWeapon = hasWeapon; s.hasArmor = hasArmor;
     s.px = px; s.py = py; s.campX = campX; s.campY = campY; s.hasCamp = hasCamp;
+    s.floor = gFloor;
     prefs.begin("dungeon", false);
     prefs.putBytes("save", &s, sizeof(s));
     prefs.end();
@@ -55,5 +58,6 @@ bool gameLoad(int32_t &px, int32_t &py, int32_t &campX, int32_t &campY, bool &ha
     equWeapon = s.equWeapon; equArmor = s.equArmor;
     hasWeapon = s.hasWeapon; hasArmor = s.hasArmor;
     px = s.px; py = s.py; campX = s.campX; campY = s.campY; hasCamp = s.hasCamp;
+    gFloor = s.floor;
     return true;
 }

@@ -19,6 +19,7 @@ make            # = make flash (собрать + залить)
 make build      # только собрать
 make flash      # собрать + прошить (PORT определяется сам; переопределить: make flash PORT=/dev/cu.usbserial-XXXX)
 make fs         # залить ТОЛЬКО watchos/data/ в SPIFFS (станции радио) без перепрошивки кода
+make sprites    # пересобрать спрайты игры: sprites/N.png -> sprites.png + sprites_gen.h
 make monitor    # серийный монитор, 115200
 make ports      # список плат
 make clean      # очистить кэш arduino-cli + удалить build_time.h
@@ -39,6 +40,13 @@ make clean      # очистить кэш arduino-cli + удалить build_tim
 - **`build_time.h` генерируется при каждой сборке** (`make` делает это автоматически). В него
   пишется реальная UNIX-эпоха хоста; `hw.cpp` ставит из неё RTC при старте. Без этого время на
   часах будет неверным. RTC батарейный — выставив один раз точно, дальше идёт сам.
+- **Спрайты игры — единый атлас.** Исходники: `watchos/src/programs/game/sprites/N.png` (каждый
+  спрайт отдельным файлом 16×16, имя = индекс; **ключ прозрачности — салатовый 0,255,0**). `make sprites`
+  (→ `tools/gen_sprites.py`) собирает их в `sprites/sprites.png` (просмотр) и **`sprites_gen.h`**
+  (`SPRITES[N][256]` RGB565, салатовый → ключ `0xF81F`). Индексы 0–99 — террейн (тайлсет, на них
+  завязан автотайл стен/пол — не сдвигать!), 100+ — сущности (`SPR_PLAYER`/`SPR_MON_BASE`/`SPR_CHEST`/…).
+  Рендер (`gamerender.cpp`, `combat.cpp`) рисует только из `SPRITES[]`. Правка спрайта: перерисовать
+  `sprites/<idx>.png` → `make sprites` → `make flash`. На экране тайл 32px (ровно ×2 от 16 — без «гуляния»).
 
 Прямые команды без Makefile — не использовать (забудешь сгенерировать `build_time.h`).
 

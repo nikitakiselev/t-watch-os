@@ -4,6 +4,7 @@
 #include "../../theme.h"
 #include "../../wifi.h"
 #include "../../keyboard.h"
+#include "../../listnav.h"
 
 static const int TITLE_Y  = STATUSBAR_H + 12;
 static const int STATUS_Y = STATUSBAR_H + 30;
@@ -99,12 +100,6 @@ static void doScan()
     scrollTop = 0;
 }
 
-static void ensureVisible()
-{
-    if (selected < scrollTop) scrollTop = selected;
-    if (selected >= scrollTop + VISIBLE) scrollTop = selected - VISIBLE + 1;
-}
-
 static void connectTo(const char *ssid, const char *pass)
 {
     overlay("connecting...", COL_AMBER);
@@ -175,8 +170,12 @@ static void wifiEvent(InputEvent e, int16_t x, int16_t y)
 {
     if (netCount == 0 && e != EVT_NONE) return;
     switch (e) {
-    case EVT_UP:   if (selected > 0)            { selected--; ensureVisible(); drawList(); } break;
-    case EVT_DOWN: if (selected < netCount - 1) { selected++; ensureVisible(); drawList(); } break;
+    case EVT_UP:
+    case EVT_DOWN: {
+        ListNav l{netCount, VISIBLE, selected, scrollTop};
+        if (listNavEvent(l, e)) { selected = l.sel; scrollTop = l.top; drawList(); }
+        break;
+    }
     case EVT_CLICK: actSelected(); break;
     case EVT_TAP:
         actSelected();                 // тап — применить ВЫДЕЛЕННЫЙ пункт (выбор — свайпами)

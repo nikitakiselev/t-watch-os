@@ -1,6 +1,11 @@
 #pragma once
 #include <stdint.h>
 
+// Типы урона (для слабостей/сопротивлений монстров).
+enum DmgType { DMG_PHYS = 0, DMG_FIRE, DMG_LIGHT, DMG_POISON, DMG_N };
+
+const char *dmgTypeName(int t);    // короткое имя типа ("Phys"/"Fire"/...)
+
 // Монстр в конкретной точке мира (порождается детерминированно из координат,
 // статы масштабируются с удалением от (0,0)).
 struct Monster {
@@ -10,10 +15,14 @@ struct Monster {
     int         hp, hpMax;
     int         atk, def, dodge;   // dodge — шанс уклона, %
     int         xp, gold;
+    int8_t      weak, resist;      // DmgType: слабость (×2) и сопротивление (÷2); -1 = нет
 };
 
 // Есть ли (непобеждённый) монстр в клетке. Заполняет out.
 bool monsterActiveAt(int32_t x, int32_t y, Monster &out);
+
+// Сбросить состояние этажа (зачищенные клетки, сундуки, алтари, руны) — новый этаж свежий.
+void floorReset();
 
 // Пометить клетку как зачищенную (после победы) — кольцевой буфер ближних клеток.
 void monsterMarkCleared(int32_t x, int32_t y);

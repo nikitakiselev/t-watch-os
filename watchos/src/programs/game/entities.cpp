@@ -1,20 +1,35 @@
 #include "entities.h"
 #include "worldgen.h"
 #include "player.h"
+#include <stdio.h>
 
-// Типы монстров (порядок = MON_TILES): имя, hp, atk, def, dodge%, xp, gold.
-struct Def { const char *name; int hp, atk, def, dodge, xp, gold; };
+// Типы монстров (порядок = MON_TILES): имя, hp, atk, def, dodge%, xp, gold, слабость, сопротивление, мин. глубина.
+// minDepth — с какой глубины этажа (|этаж|) монстр начинает встречаться. Должна НЕ убывать по индексу
+// (выбор типа опирается на это: глубже открываются всё более тяжёлые монстры).
+struct Def { const char *name; int hp, atk, def, dodge, xp, gold; int8_t weak, resist; uint8_t minDepth; };
 static const Def DEFS[9] = {
-    { "Slime",      18,  4, 1,  5,   8,   3 },   // 0 slime-green
-    { "Blue Slime", 26,  5, 2,  8,  11,   5 },   // 1 slime-blue
-    { "Skeleton",   32,  7, 3,  8,  15,   7 },   // 2 skeleton
-    { "Zombie",     46,  9, 4,  3,  22,  10 },   // 3 zombie
-    { "Snowman",    52, 10, 5,  6,  26,  12 },   // 4 evil-snowman
-    { "Tsargo",     64, 12, 6,  9,  32,  16 },   // 5 tsargo
-    { "Troll",      75, 14, 7,  5,  38,  20 },   // 6 troll
-    { "Yeti",       90, 16, 8,  7,  48,  28 },   // 7 yeti
-    { "Cyclops",   110, 19,10,  8,  62,  40 },   // 8 cyclops
+    { "Slime",      18,  4, 1,  5,   8,   3, DMG_FIRE,   DMG_PHYS,    0 },   // 0 студень гасит удары, горит
+    { "Blue Slime", 26,  5, 2,  8,  11,   5, DMG_LIGHT,  DMG_POISON,  0 },   // 1 проводит ток, токсинам всё равно
+    { "Skeleton",   32,  7, 3,  8,  15,   7, DMG_PHYS,   DMG_POISON,  0 },   // 2 кости крошатся, плоти нет
+    { "Zombie",     46,  9, 4,  3,  22,  10, DMG_FIRE,   DMG_POISON,  0 },   // 3 нежить горит, ядом не взять
+    { "Snowman",    52, 10, 5,  6,  26,  12, DMG_FIRE,   DMG_PHYS,    5 },   // 4 тает от огня, снег держит удар
+    { "Tsargo",     64, 12, 6,  9,  32,  16, DMG_LIGHT,  DMG_FIRE,    8 },   // 5 огнеупорный, боится тока
+    { "Troll",      75, 14, 7,  5,  38,  20, DMG_FIRE,   DMG_PHYS,   12 },   // 6 регенерирует, огонь жжёт
+    { "Yeti",       90, 16, 8,  7,  48,  28, DMG_FIRE,   DMG_LIGHT,  16 },   // 7 ледяной, шерсть изолирует ток
+    { "Cyclops",   110, 19,10,  8,  62,  40, DMG_POISON, DMG_PHYS,   22 },   // 8 толстокожий, но травится ядом
 };
+#define MON_N ((int)(sizeof(DEFS) / sizeof(DEFS[0])))
+
+const char *dmgTypeName(int t)
+{
+    switch (t) {
+        case DMG_PHYS:   return "Phys";
+        case DMG_FIRE:   return "Fire";
+        case DMG_LIGHT:  return "Light";
+        case DMG_POISON: return "Poison";
+        default:         return "-";
+    }
+}
 
 static uint32_t h2(int32_t x, int32_t y)
 {
@@ -87,38 +102,58 @@ void markEventTriggered(int32_t x, int32_t y)
     if (evN < CLR_MAX) evN++;
 }
 
+void floorReset()
+{
+    clrN = clrHead = 0;        // зачищенные клетки
+    chN  = chHead  = 0;        // открытые сундуки
+    alN  = alHead  = 0;        // использованные алтари
+    evN  = evHead  = 0;        // сработавшие руны
+}
+
 bool monsterActiveAt(int32_t x, int32_t y, Monster &out)
 {
     if (tileAt(x, y) != TILE_FLOOR) return false;     // только на чистом полу
+    if (inCamp(x, y)) return false;                   // в кампе безопасно — без монстров
+
+    int depth = -gFloor;                              // глубина этажа (0 наверху … 128 внизу)
+    if (depth < 0) depth = 0;
+
     uint32_t h = h2(x, y);
-    if (h % 100u >= 10u) return false;                // ~10% полов
+    int density = 10 + depth;                         // плотность монстров растёт с глубиной
+    if (density > 40) density = 40;                   // потолок ~40% полов
+    if (h % 100u >= (uint32_t)density) return false;
     if (isCleared(x, y)) return false;
 
-    long ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
-    long d  = ax > ay ? ax : ay;                      // дистанция от (0,0)
-    // Базовый уровень монстра растёт ВМЕСТЕ с игроком, + за удалённость, ± разброс.
-    int  variance = (int)((h >> 4) % 3u) - 1;         // -1..+1
-    int  level = gp.level + (int)(d / 24) + variance;
+    // Уровень монстра задаётся ЭТАЖОМ (не игроком): на 1 глубже — на 1 сильнее, ± разброс (±2).
+    int variance = (int)((h >> 4) % 5u) - 2;          // -2..+2
+    int level = 1 + depth + variance;
     if (level < 1) level = 1;
 
-    int type;
-    if      (level <= 2) type = (int)((h >> 8) & 1u);        // slime / blue slime
-    else if (level <= 4) type = 2 + (int)((h >> 8) & 1u);    // skeleton / zombie
-    else if (level <= 6) type = 4 + (int)((h >> 8) & 1u);    // snowman / tsargo
-    else if (level <= 8) type = 6 + (int)((h >> 8) & 1u);    // troll / yeti
-    else                 type = 8;                           // cyclops
-    bool boss = (level >= 10 && (h >> 16) % 18u == 0u);
-    if (boss) type = 8;
+    // Типы, доступные на этой глубине, — префикс [0..maxType] (minDepth не убывает по индексу).
+    int maxType = 0;
+    for (int i = 0; i < MON_N; i++) if (DEFS[i].minDepth <= depth) maxType = i;
+    // Берём из «окна» последних 4 открытых тиров — глубже вытесняет слабую мелочь.
+    int lo = maxType - 3; if (lo < 0) lo = 0;
+    int type = lo + (int)((h >> 8) % (uint32_t)(maxType - lo + 1));
+
+    bool boss = (depth >= 10 && (h >> 16) % 18u == 0u);
+    if (boss) type = maxType;                          // боссом становится самый тяжёлый доступный тип
 
     const Def &D = DEFS[type];
+    static char bossName[24];
     out.spriteId = (uint8_t)type;
-    out.name  = boss ? "Cyclops!" : D.name;
+    if (boss) { snprintf(bossName, sizeof(bossName), "%s!", D.name); out.name = bossName; }
+    else      out.name = D.name;
     out.level = level;
     out.hpMax = out.hp = (D.hp + level * 5) * (boss ? 2 : 1);
     out.atk   = (D.atk + level * 2) * (boss ? 3 : 2) / 2;    // boss x1.5
     out.def   = D.def + level;
     out.dodge = D.dodge;
-    out.xp    = (D.xp + level * 8) * (boss ? 2 : 1);     // награда сильнее растёт с уровнем
-    out.gold  = (D.gold + level * 5) * (boss ? 2 : 1);
+    // Множитель награды за глубину (поверх роста от уровня): +6% за этаж вниз.
+    int rmul = 100 + depth * 6;
+    out.xp    = (D.xp + level * 8) * (boss ? 2 : 1) * rmul / 100;
+    out.gold  = (D.gold + level * 5) * (boss ? 2 : 1) * rmul / 100;
+    out.weak   = D.weak;
+    out.resist = D.resist;
     return true;
 }
