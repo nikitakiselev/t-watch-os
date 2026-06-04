@@ -2,6 +2,7 @@ import asyncio, logging, time
 import re
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from server import cleanup, pipeline
 from server.config import get_settings
@@ -15,7 +16,9 @@ _SAFE = re.compile(r"^[A-Za-z0-9_-]+$")
 async def talk(session: str, request: Request):
     settings = get_settings()
     audio_lpcm = await request.body()
-    url = pipeline.process_turn(settings, session, audio_lpcm)
+    # process_turn блокирующий (STT+GPT+TTS, ~3-10 c) — уводим в пул потоков,
+    # чтобы не вешать event loop (фоновую чистку, параллельные запросы).
+    url = await run_in_threadpool(pipeline.process_turn, settings, session, audio_lpcm)
     if url is None:
         return Response(status_code=204)
     return JSONResponse({"url": url})
