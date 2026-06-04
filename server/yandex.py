@@ -26,11 +26,12 @@ def stt_recognize(audio_lpcm: bytes, *, api_key: str, folder_id: str,
 
 
 def gpt_complete(messages: list, *, api_key: str, folder_id: str,
-                 max_tokens: int = 120, temperature: float = 0.6) -> str:
+                 model: str = "yandexgpt", max_tokens: int = 600,
+                 temperature: float = 0.6) -> str:
     resp = httpx.post(
         _GPT_URL,
         json={
-            "modelUri": f"gpt://{folder_id}/yandexgpt-lite/latest",
+            "modelUri": f"gpt://{folder_id}/{model}/latest",
             "completionOptions": {"stream": False,
                                   "temperature": temperature,
                                   "maxTokens": str(max_tokens)},

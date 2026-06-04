@@ -23,7 +23,7 @@ def process_turn(settings: Settings, session_id: str, audio_lpcm: bytes):
 
     reply = yandex.gpt_complete(
         messages, api_key=settings.api_key, folder_id=settings.folder_id,
-        max_tokens=settings.max_tokens).strip()
+        model=settings.gpt_model, max_tokens=settings.max_tokens).strip()
     sessions.append_turn(settings.data_dir, session_id, "bot", reply)
 
     opus = yandex.tts_synthesize(
