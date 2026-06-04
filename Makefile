@@ -1,0 +1,64 @@
+# watchOS — сборка и прошивка для LilyGo T-Watch-2020 V3
+#
+#   make            — собрать и прошить (= make flash)
+#   make build      — только собрать
+#   make flash      — собрать и залить на часы
+#   make fs         — залить ТОЛЬКО файлы из watchos/data/ в SPIFFS (станции и т.п.)
+#   make monitor    — серийный монитор (Serial, 115200)
+#   make ports      — список подключённых плат/портов
+#   make clean      — очистить кэш сборки arduino-cli
+#
+# Порт можно переопределить:  make flash PORT=/dev/cu.usbserial-XXXX
+
+SKETCH := watchos
+FQBN   := esp32:esp32:twatch
+BAUD   := 115200
+CLI    := arduino-cli
+
+# Порт определяется автоматически (первый usbserial), но переопределяем при желании.
+PORT ?= $(shell ls /dev/cu.usbserial-* 2>/dev/null | head -1)
+
+# Инструменты и раздел SPIFFS (для make fs). Версии подхватываются по маске.
+ESP32TOOLS  := $(HOME)/Library/Arduino15/packages/esp32/tools
+MKSPIFFS    := $(firstword $(wildcard $(ESP32TOOLS)/mkspiffs/*/mkspiffs))
+ESPTOOL     := $(firstword $(wildcard $(ESP32TOOLS)/esptool_py/*/esptool))
+SPIFFS_OFF  := 0xc90000
+SPIFFS_SIZE := 3538944          # 0x360000 (раздел spiffs в default_16MB)
+
+.PHONY: all time build flash upload fs monitor ports clean
+
+all: flash
+
+# Реальное время хоста → build_time.h. Из него RTC ставится при старте,
+# иначе часы показывают неверное время. Генерируется при каждой сборке.
+time:
+	@printf '#pragma once\n#define BUILD_UNIX_TIME %sUL\n' "$$(date +%s)" > $(SKETCH)/build_time.h
+	@echo "build_time.h -> $$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+build: time
+	$(CLI) compile --fqbn $(FQBN) ./$(SKETCH)
+
+flash upload: build
+	@test -n "$(PORT)" || { echo "Порт не найден. Укажи: make flash PORT=/dev/cu.usbserial-XXXX"; exit 1; }
+	$(CLI) upload --fqbn $(FQBN) -p $(PORT) ./$(SKETCH)
+	@echo "flashed -> $(PORT)  ($$(date '+%H:%M:%S'))"
+
+# Залить только содержимое watchos/data/ в SPIFFS (быстрое обновление станций).
+fs:
+	@test -n "$(PORT)" || { echo "Порт не найден. Укажи: make fs PORT=/dev/cu.usbserial-XXXX"; exit 1; }
+	@mkdir -p .build
+	$(MKSPIFFS) -c $(SKETCH)/data -b 4096 -p 256 -s $(SPIFFS_SIZE) .build/spiffs.bin
+	$(ESPTOOL) --chip esp32 --port $(PORT) --baud 460800 --before default_reset --after hard_reset write_flash -z $(SPIFFS_OFF) .build/spiffs.bin
+	@echo "spiffs flashed -> $(PORT)"
+
+monitor:
+	@test -n "$(PORT)" || { echo "Порт не найден. Укажи: make monitor PORT=/dev/cu.usbserial-XXXX"; exit 1; }
+	$(CLI) monitor -p $(PORT) -c baudrate=$(BAUD)
+
+ports:
+	$(CLI) board list
+
+clean:
+	$(CLI) cache clean
+	@rm -f $(SKETCH)/build_time.h
+	@echo "cleaned"

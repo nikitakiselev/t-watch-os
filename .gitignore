@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Сборка / кэш arduino-cli
+.build/
+
+# IDE
+.idea/
+
+# Генерируется при каждой сборке (make пишет UNIX-эпоху хоста)
+watchos/build_time.h
