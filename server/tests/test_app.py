@@ -52,3 +52,11 @@ def test_audio_rejects_traversal(tmp_path, monkeypatch):
     c = make_client(tmp_path, monkeypatch)
     r = c.get("/audio/sid/..%2f..%2fconfig.py")
     assert r.status_code in (400, 404)
+
+
+def test_audio_rejects_encoded_dotdot_session(tmp_path, monkeypatch):
+    # %2e%2e декодируется в '..' как ОДИН сегмент session_id → доходит до хэндлера
+    # и должен отлетать на проверке регекса (а не на роутинге).
+    c = make_client(tmp_path, monkeypatch)
+    r = c.get("/audio/%2e%2e/0.mp3")
+    assert r.status_code == 400
