@@ -36,14 +36,37 @@ static void genSession()
              a, b & 0xffff, (c & 0x0fff), (d & 0x3fff) | 0x8000, b, d & 0xffff);
 }
 
-static void drawButton(uint16_t col, const char *label)
+static void iconMic(int cx, int cy, uint16_t c)
+{
+    tft->fillRoundRect(cx - 9, cy - 22, 18, 30, 9, c);     // капсула
+    tft->drawFastHLine(cx - 13, cy + 14, 26, c);           // подставка
+    tft->drawFastVLine(cx, cy + 8, 6, c);
+}
+static void iconDots(int cx, int cy, uint16_t c)
+{
+    tft->fillCircle(cx - 16, cy, 4, c);
+    tft->fillCircle(cx,      cy, 4, c);
+    tft->fillCircle(cx + 16, cy, 4, c);
+}
+static void iconSpeaker(int cx, int cy, uint16_t c)
+{
+    tft->fillRect(cx - 16, cy - 7, 10, 14, c);             // корпус
+    tft->fillTriangle(cx - 6, cy - 14, cx - 6, cy + 14, cx + 6, cy, c);
+    tft->drawCircle(cx + 12, cy, 7, c);                    // звуковая волна
+}
+
+static void drawButton(uint16_t col)
 {
     tft->fillRect(0, CONTENT_TOP, SCR_W, CONTENT_BOTTOM - CONTENT_TOP, COL_BG);
     tft->drawCircle(BTN_CX, BTN_CY, BTN_R, col);
     tft->drawCircle(BTN_CX, BTN_CY, BTN_R - 1, col);
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(col, COL_BG);
-    tft->drawString(label, BTN_CX, BTN_CY, 4);
+    switch (state) {
+    case ST_IDLE:      iconMic(BTN_CX, BTN_CY, col);     break;
+    case ST_RECORDING: iconMic(BTN_CX, BTN_CY, col);     break;
+    case ST_SENDING:   iconDots(BTN_CX, BTN_CY, col);    break;
+    case ST_SPEAKING:  iconSpeaker(BTN_CX, BTN_CY, col); break;
+    default: break;
+    }
 }
 
 static void drawScreen()
@@ -54,11 +77,12 @@ static void drawScreen()
     tft->setTextColor(COL_AMBER, COL_BG);
     tft->drawString("AI ASSISTANT", SCR_W / 2, STATUSBAR_H + 12, 2);
     switch (state) {
-    case ST_IDLE:      drawButton(COL_GREEN,    "TALK");  break;
-    case ST_RECORDING: drawButton(COL_AMBER,    "REC");   break;
-    case ST_SENDING:   drawButton(COL_GREEN_DIM,"...");   break;
-    case ST_SPEAKING:  drawButton(RGB565(0x33,0xcc,0xff), "SPK"); break;
+    case ST_IDLE:      drawButton(COL_GREEN);                  break;
+    case ST_RECORDING: drawButton(COL_AMBER);                  break;
+    case ST_SENDING:   drawButton(COL_GREEN_DIM);              break;
+    case ST_SPEAKING:  drawButton(RGB565(0x33, 0xcc, 0xff));   break;
     case ST_NOWIFI:
+        tft->setTextDatum(MC_DATUM);
         tft->setTextColor(COL_AMBER, COL_BG);
         tft->drawString("no wifi", SCR_W / 2, BTN_CY, 4);
         break;
@@ -158,6 +182,18 @@ static void assistantTick()
         if (recSamples < REC_CAP) {
             int got = micCaptureRead(recBuf + recSamples, REC_CAP - recSamples);
             recSamples += got;
+        }
+        // секунды записи под кнопкой (точечно, без мерцания)
+        static int lastSec = -1;
+        int sec = recSamples / SR;
+        if (sec != lastSec) {
+            lastSec = sec;
+            char b[8];
+            snprintf(b, sizeof(b), "%ds", sec);
+            tft->fillRect(BTN_CX - 30, BTN_CY + BTN_R + 6, 60, 20, COL_BG);
+            tft->setTextDatum(MC_DATUM);
+            tft->setTextColor(COL_AMBER, COL_BG);
+            tft->drawString(b, BTN_CX, BTN_CY + BTN_R + 14, 2);
         }
         if (!touchDown() || recSamples >= REC_CAP) {
             stopRecording();
