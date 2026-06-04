@@ -115,8 +115,28 @@ static void startRecording()
 static void stopRecording()
 {
     micCaptureEnd();
-    state = ST_IDLE;          // отправку добавит Task 5; пока возврат в IDLE
+
+    if (recSamples < SR * 3 / 10) {        // < 0.3 c — игнор
+        state = ST_IDLE;
+        drawScreen();
+        return;
+    }
+
+    state = ST_SENDING;                    // рисуем «...» ДО блокирующего POST
     drawScreen();
+
+    AiResult res = aiSend(sessionId, recBuf, recSamples);   // блокирует ~5-10 c
+
+    if (res.code == 200 && res.url.length() > 0) {
+        audioSetVolume(18);
+        audioStart(res.url.c_str());       // connecttohost (https) — асинхронно
+        state = ST_SPEAKING;
+        drawScreen();
+    } else {
+        soundBeep(res.code == 204 ? 600 : 300, 120);   // 204 — не расслышал; иначе ошибка
+        state = ST_IDLE;
+        drawScreen();
+    }
 }
 
 static void assistantTick()
@@ -132,6 +152,12 @@ static void assistantTick()
         }
         if (!touchDown() || recSamples >= REC_CAP) {
             stopRecording();
+        }
+    }
+    if (state == ST_SPEAKING) {
+        if (!audioIsPlaying()) {
+            state = ST_IDLE;
+            drawScreen();
         }
     }
 }
