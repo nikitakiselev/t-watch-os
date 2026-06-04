@@ -18,6 +18,13 @@ static const int REC_MAX_SECONDS = 15;
 static const int SR = 16000;
 static const int REC_CAP = SR * REC_MAX_SECONDS;   // макс. сэмплов
 
+// Состояние воспроизведения ответа (борьба с гонкой audioIsPlaying):
+// audioStart() лишь ставит флаг; аудио-задача поднимет поток позже, поэтому
+// сразу после старта playing ещё false. Ждём, пока реально заиграет.
+static uint32_t speakStartMs = 0;
+static bool     playStarted  = false;
+static const uint32_t SPEAK_CONNECT_TIMEOUT_MS = 10000;   // не заиграло за 10 c → сдаёмся
+
 // Кнопка-микрофон в центре экрана.
 static const int BTN_CX = SCR_W / 2, BTN_CY = 116, BTN_R = 66;
 
@@ -130,6 +137,8 @@ static void stopRecording()
     if (res.code == 200 && res.url.length() > 0) {
         audioSetVolume(18);
         audioStart(res.url.c_str());       // connecttohost (https) — асинхронно
+        speakStartMs = millis();
+        playStarted  = false;
         state = ST_SPEAKING;
         drawScreen();
     } else {
@@ -155,8 +164,10 @@ static void assistantTick()
         }
     }
     if (state == ST_SPEAKING) {
-        if (!audioIsPlaying()) {
-            state = ST_IDLE;
+        if (audioIsPlaying()) {
+            playStarted = true;                          // поток реально пошёл
+        } else if (playStarted || millis() - speakStartMs > SPEAK_CONNECT_TIMEOUT_MS) {
+            state = ST_IDLE;                             // доиграло, либо так и не стартовало за таймаут
             drawScreen();
         }
     }
