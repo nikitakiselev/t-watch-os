@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 _SAFE = re.compile(r"[^A-Za-z0-9_-]")
+_NEWLINES = re.compile(r"[\r\n]+")
 
 
 def _safe_id(session_id: str) -> str:
@@ -9,14 +10,18 @@ def _safe_id(session_id: str) -> str:
     return _SAFE.sub("", session_id)[:64] or "default"
 
 
+def _sessions_dir(data_dir: Path) -> Path:
+    return data_dir / "sessions"
+
+
 def _history_file(data_dir: Path, session_id: str) -> Path:
-    d = data_dir / "sessions"
-    d.mkdir(parents=True, exist_ok=True)
-    return d / f"{_safe_id(session_id)}.txt"
+    return _sessions_dir(data_dir) / f"{_safe_id(session_id)}.txt"
 
 
 def append_turn(data_dir: Path, session_id: str, role: str, text: str) -> None:
-    line = f"{role}: {text.replace(chr(10), ' ').strip()}\n"
+    # Схлопываем любые переводы строк (\r, \n, \r\n) в пробел — одна реплика = одна строка.
+    line = f"{role}: {_NEWLINES.sub(' ', text).strip()}\n"
+    _sessions_dir(data_dir).mkdir(parents=True, exist_ok=True)
     with _history_file(data_dir, session_id).open("a", encoding="utf-8") as f:
         f.write(line)
 
