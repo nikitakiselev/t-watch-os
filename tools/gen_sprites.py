@@ -12,12 +12,15 @@ DIR    = os.path.join(HERE, '..', 'watchos', 'src', 'programs', 'dungeon', 'spri
 OUT_H  = os.path.join(DIR, '..', 'sprites_gen.h')
 OUT_PNG= os.path.join(DIR, 'sprites.png')
 PX, COLS, KEY = 16, 10, 0xF81F
-NAMES = {100: 'PLAYER', 110: 'CHEST', 111: 'TRADER', 112: 'STAIRS'}
+SHADOW = 0xF81E   # маркер полупрозрачной тени (чёрный ~35%): рендер блендит с фоном под спрайтом
+NAMES = {100: 'PLAYER', 110: 'CHEST', 111: 'TRADER', 112: 'STAIRS',
+         113: 'KNIGHT_IDLE',   # idle-анимация игрока: кадры 113,114 (SPR_KNIGHT_IDLE + frame)
+         115: 'KNIGHT_RUN'}    # бег: кадры 115..120 (SPR_KNIGHT_RUN + frame, 6 шт., рисуются «вправо»)
 MON_BASE = 101
 
-def transparent(r, g, b, a):
-    # салатовый ключ (с допуском на лёгкую кайму) или альфа
-    return a < 128 or (g >= 180 and r <= 70 and b <= 70)
+def greenkey(r, g, b):
+    # салатовый ключ прозрачности (с допуском на лёгкую кайму)
+    return g >= 180 and r <= 70 and b <= 70
 
 def load_cell(path):
     w, h, ch, px = decode_png(path)
@@ -29,8 +32,12 @@ def load_cell(path):
             if ch == 4: r, g, b, a = px[o], px[o+1], px[o+2], px[o+3]
             elif ch == 3: r, g, b, a = px[o], px[o+1], px[o+2], 255
             else: v = px[o]; r = g = b = v; a = 255 if ch == 1 else px[o+1]
-            if transparent(r, g, b, a): out.append(KEY); rgb.append(None)
-            else: out.append(rgb565(r, g, b)); rgb.append((r, g, b))
+            if a < 32 or greenkey(r, g, b):
+                out.append(KEY); rgb.append(None)              # полностью прозрачно
+            elif a < 200:
+                out.append(SHADOW); rgb.append((30, 30, 30))   # тень → блендится в рендере
+            else:
+                out.append(rgb565(r, g, b)); rgb.append((r, g, b))  # непрозрачно
     return out, rgb
 
 idxs = [int(f[:-4]) for f in os.listdir(DIR) if f.endswith('.png') and f[:-4].isdigit()]

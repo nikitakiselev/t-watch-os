@@ -18,8 +18,11 @@
 
 // Управление: тап по стрелке-зоне → шаг; удержание → автоповтор.
 static const int      HIT_R      = 24;    // полуразмер хит-зоны вокруг стрелки, px
-static const uint32_t HOLD_DELAY = 500;   // мс до начала автоповтора
-static const uint32_t REPEAT_MS  = 180;   // период автоповтора
+static const uint32_t HOLD_DELAY = 0;     // без стартовой паузы — удержание сразу идёт непрерывно
+static const uint32_t REPEAT_MS  = 60;    // минимальный интервал между шагами (троттл удара в стену;
+                                          // реальный шаг длится дольше из-за анимации скролла — паузы не создаёт)
+static const int      ANIM_FRAMES = 4;    // ПРОТОТИП: кадров плавного скролла на шаг
+static const uint32_t IDLE_ANIM_MS = 450; // период смены кадра idle-анимации игрока
 
 static int      heldDx = 0, heldDy = 0;
 static uint32_t holdStart = 0, lastRep = 0;
@@ -665,8 +668,19 @@ static bool step(int dx, int dy)                // true — игрок реал�
         return false;                            // в клетку монстра не входим
     }
 
+    // Бег: режим run + направление взгляда по dx, следующий кадр анимации ног.
+    gamePlayerSetMoving(true, dx);
+    gamePlayerAnimAdvance();
+
+    // Плавный скролл: рисуем серию кадров, сдвигая мир от старой позиции к новой.
+    // Рендер идёт ещё центрированным на (px,py), а мир едет на ox/oy; в конце фиксируем
+    // новую позицию (кадр с полным сдвигом == обычный кадр в новой точке).
+    for (int f = 1; f <= ANIM_FRAMES; f++) {
+        int ox = -dx * TILE * f / ANIM_FRAMES;
+        int oy = -dy * TILE * f / ANIM_FRAMES;
+        gameRenderMap(px, py, ox, oy);
+    }
     px = tx; py = ty;
-    gameRenderMap(px, py);
     return true;
 }
 
@@ -742,6 +756,26 @@ static void gameTick()
         }
     } else {
         heldDx = heldDy = 0;                            // отпустили / центр
+    }
+
+    // Анимация игрока в простое: пока стоим (палец не на экране) — листаем idle-кадры.
+    // При остановке после бега — сразу один кадр idle-позы, дальше по таймеру.
+    static uint32_t lastIdle = 0;
+    static bool     wasMoving = false;
+    if (inEdge) {
+        wasMoving = true;                              // держим стрелку → бежим (кадры крутит step)
+    } else if (!down) {
+        if (wasMoving) {                              // только что остановились → idle-поза сразу
+            wasMoving = false;
+            gamePlayerSetMoving(false, 0);
+            gameRenderMap(px, py);
+            lastIdle = now;
+        } else if (now - lastIdle >= IDLE_ANIM_MS) {
+            lastIdle = now;
+            gamePlayerSetMoving(false, 0);
+            gamePlayerAnimAdvance();
+            gameRenderMap(px, py);
+        }
     }
 }
 

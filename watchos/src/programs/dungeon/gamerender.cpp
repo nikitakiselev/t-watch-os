@@ -19,7 +19,31 @@
 // иначе по бокам вертикальных стен видна тёмная полоса, не совпадающая с чёрным.
 #define COL_VOID 0x2083
 
+// Полупрозрачная тень спрайта: маркер 0xF81E (ставит gen_sprites) → блендим чёрный
+// с пикселем под спрайтом. SHADOW_ALPHA — доля чёрного (90/255 ≈ 35%, как в исходном PNG).
+#define COL_SHADOW_KEY 0xF81E
+#define SHADOW_ALPHA   90
+static uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t a);   // определена ниже
+
 static TFT_eSprite *spr = nullptr;
+
+// ── Анимация игрока (рыцарь) ──
+// idle: 2 кадра (SPR_KNIGHT_IDLE..+1), run: 6 кадров (SPR_KNIGHT_RUN..+5).
+// Бег нарисован «вправо»; влево — зеркалим по горизонтали при отрисовке (без доп. спрайтов).
+static bool pMoving = false;     // бег vs простой
+static bool pFlip   = false;     // true → смотрит влево (горизонтальное зеркало)
+static int  pIdleF  = 0;         // кадр idle 0..1
+static int  pRunF   = 0;         // кадр run 0..5
+void gamePlayerSetMoving(bool moving, int dx)
+{
+    pMoving = moving;
+    if (dx < 0) pFlip = true; else if (dx > 0) pFlip = false;   // dx==0 — оставить как было
+}
+void gamePlayerAnimAdvance()
+{
+    if (pMoving) pRunF = (pRunF + 1) % 6;
+    else         pIdleF ^= 1;
+}
 
 // Пол — 12 вариантов с бледными трещинами, рандом по координате.
 static const uint8_t FLOORS[12] = { 11,12,13,14, 21,22,23,24, 31,32,33,34 };
@@ -64,15 +88,21 @@ static void blitTile(int x, int y, const uint16_t *d)
 
 // Прозрачный блит спрайта (ключ 0xF81F) с масштабом SRC_PX→TILE (×2), на всю клетку —
 // чтобы сущности были того же размера, что пол/стены (а не вдвое мельче).
-static void blitKeyedCentered(int cellX, int cellY, int px, const uint16_t *d)
+static void blitKeyedCentered(int cellX, int cellY, int px, const uint16_t *d, bool flip = false)
 {
     (void)px;
     for (int dy = 0; dy < TILE; dy++) {
         int sy = dy * SRC_PX / TILE;
         for (int dx = 0; dx < TILE; dx++) {
             int sx = dx * SRC_PX / TILE;
+            if (flip) sx = SRC_PX - 1 - sx;                     // зеркало по горизонтали
             uint16_t c = d[sy * SRC_PX + sx];
-            if (c != 0xF81F) spr->drawPixel(cellX + dx, cellY + dy, c);
+            if (c == 0xF81F) continue;                          // прозрачно
+            int X = cellX + dx, Y = cellY + dy;
+            if (c == COL_SHADOW_KEY)                            // тень: чёрный поверх фона
+                spr->drawPixel(X, Y, blend565(0x0000, spr->readPixel(X, Y), SHADOW_ALPHA));
+            else
+                spr->drawPixel(X, Y, c);
         }
     }
 }
@@ -137,16 +167,18 @@ static void drawArrow(int cx,int cy,int dir)
     else fillTriAlpha(cx+r,cy,cx-r,cy-r,cx-r,cy+r,c);
 }
 
-void gameRenderMap(int32_t px, int32_t py)
+void gameRenderMap(int32_t px, int32_t py, int ox, int oy)
 {
     if (!spr) return;
     spr->fillSprite(COL_VOID);                     // пустота = тёмный фон тайлсета
 
     Monster m;
-    for (int vy = 0; vy < VH; vy++)
-        for (int vx = 0; vx < VW; vx++) {
+    // При сдвиге (ox/oy != 0) рисуем на один ряд/столбец больше с каждой стороны —
+    // тайлы, заезжающие из-за края. drawPixel клипует выход за границы спрайта.
+    for (int vy = -1; vy <= VH; vy++)
+        for (int vx = -1; vx <= VW; vx++) {
             int32_t wx = px + vx - VW/2, wy = py + vy - VH/2;
-            int x = vx * TILE, y = vy * TILE;
+            int x = vx * TILE + ox, y = vy * TILE + oy;
             uint8_t t = tileAt(wx, wy);
 
             if (t == TILE_WALL) {                  // стена / пустота
@@ -168,8 +200,9 @@ void gameRenderMap(int32_t px, int32_t py)
                 blitKeyedCentered(x, y, SPR_PX, SPRITES[SPR_MON_BASE + m.spriteId]);
         }
 
-    // Игрок по центру вьюпорта.
-    blitKeyedCentered((VW/2)*TILE, (VH/2)*TILE, SPR_PX, SPRITES[SPR_PLAYER]);
+    // Игрок по центру вьюпорта (idle/run кадр, при взгляде влево — зеркало).
+    int pIdx = pMoving ? (SPR_KNIGHT_RUN + pRunF) : (SPR_KNIGHT_IDLE + pIdleF);
+    blitKeyedCentered((VW/2)*TILE, (VH/2)*TILE, SPR_PX, SPRITES[pIdx], pFlip);
 
     // Стрелки управления.
     drawArrow(VW*TILE/2,           ARROW_OFF,           0);
