@@ -9,6 +9,7 @@
 #include "../../../power.h"
 #include "../../../sound.h"
 #include "../../../listnav.h"
+#include "../../../modal.h"
 #include <Arduino.h>
 #include <string.h>
 #include <stdarg.h>
@@ -81,6 +82,10 @@ static void blitSpriteX2(const uint16_t *d, int x, int y)
         }
 }
 
+// Округление вверх деления на 100 (для x>=0). Любой положительный процент даёт >=1:
+// пассивки (+1%/ранг) вносят вклад уже с 1-го ранга, а не теряются при floor.
+static int ceilDiv100(int x) { return x > 0 ? (x + 99) / 100 : 0; }
+
 // Модификатор урона по типу: слабость ×2, сопротивление ÷2 (минимум 1, если урон был).
 static const char *gTypeTag = "";   // метка последнего удара: "WEAK!"/"RES"/"" (для лога)
 
@@ -88,7 +93,7 @@ static int typeMod(int d, int type, const Monster &mon)
 {
     gTypeTag = "";
     if (d <= 0) return d;
-    d = d * (100 + playerMasteryPct(type)) / 100;     // пассивное мастерство игрока (+% урона типа)
+    d += ceilDiv100(d * playerMasteryPct(type));      // пассивное мастерство игрока (+% урона типа, ceil)
     if      (type == mon.weak)   { d *= 2; gTypeTag = "WEAK!"; }
     else if (type == mon.resist) { d /= 2; if (d < 1) d = 1; gTypeTag = "RES"; }
     return d;
@@ -188,13 +193,10 @@ static int armEff(uint8_t ef) { return (hasArmor  && equArmor.effect  == ef) ? e
 // Модальное окно: ждёт тапа/кнопки и закрывается (чисто информационное).
 static void waitDismiss()
 {
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_TAP || e == EVT_BACK) return;
-        delay(20);
     }
 }
 
@@ -202,8 +204,7 @@ static void waitDismiss()
 static void monsterInfoDialog(const Monster &mon)
 {
     const int w = 216, h = 184, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
     blitSpriteX2(SPRITES[SPR_MON_BASE + mon.spriteId], x0 + 14, y0 + 14);
 
     char b[32];
@@ -239,8 +240,7 @@ static void monsterInfoDialog(const Monster &mon)
 static void playerInfoDialog()
 {
     const int w = 216, h = 184, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_GREEN);
+    modalPanel(x0, y0, w, h, 12, COL_GREEN);
     blitSpriteX2(SPRITES[SPR_PLAYER], x0 + 14, y0 + 14);
 
     char b[32];
@@ -323,11 +323,9 @@ static void showHitDialog(int start)
     int top = 0;
     const HitInfo *h = (sides[cur] == 0) ? &hitP : &hitM;
     drawHitFull(*h, top, ns);
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) return;
         if (e == EVT_DOWN) { if (top + HV_VIS < h->n) { top++; drawHitFull(*h, top, ns); } continue; }
         if (e == EVT_UP)   { if (top > 0)             { top--; drawHitFull(*h, top, ns); } continue; }
@@ -338,7 +336,6 @@ static void showHitDialog(int start)
             continue;
         }
         if (e == EVT_TAP) return;                          // тап — закрыть
-        delay(20);
     }
 }
 
@@ -393,7 +390,7 @@ static void playerAttack(Monster &mon)
     hitLine(hitP, "= phys dmg    %d", dphys);
 
     if (et >= 0) {                                           // стихийный кусок оружия
-        int elemMast = elemBase * (100 + emast) / 100;
+        int elemMast = elemBase + ceilDiv100(elemBase * emast);
         hitLine(hitP, "-- WEAPON %s --", dmgTypeName(et));
         hitLine(hitP, "elem base     %d", elemBase);
         if (emast)      hitLine(hitP, "mastery +%d%%  %d", emast, elemMast);
@@ -409,7 +406,7 @@ static void playerAttack(Monster &mon)
     int lsPct = playerLifestealPct() + wpnEff(EF_LIFESTEAL);
     int lsHp = 0;
     if (lsPct > 0) {
-        lsHp = d * lsPct / 100; if (lsHp < 1) lsHp = 1;      // «чуть-чуть» — минимум 1
+        lsHp = ceilDiv100(d * lsPct);                        // ceil: «чуть-чуть» = минимум 1
         gp.hp += lsHp; if (gp.hp > gp.hpMax) gp.hp = gp.hpMax;
         hitLine(hitP, "lifesteal %d%%  +%d hp", lsPct, lsHp);
     }
@@ -448,7 +445,7 @@ static bool castSkill(int id, Monster &mon)
             int mult = 150 + (rank - 1) * 6;                  // ×1.5 на r1, +6%/ранг
             int base = wstrike ? (atkv * mult / 100) : pw;
             int afterDef = base - (s.ignoreDef ? 0 : mon.def / 4); if (afterDef < 1) afterDef = 1;
-            int afterMast = afterDef * (100 + mast) / 100;
+            int afterMast = afterDef + ceilDiv100(afterDef * mast);
             int d = typeMod(afterDef, s.dmgType, mon);
             mon.hp -= d;
             const char *stat = (s.dmgType == DMG_PHYS) ? "STR" : "INT";
@@ -471,7 +468,7 @@ static bool castSkill(int id, Monster &mon)
             int lsHp = 0;
             if (s.dmgType == DMG_PHYS) {
                 int lsPct = playerLifestealPct();
-                if (lsPct > 0) { lsHp = d * lsPct / 100; if (lsHp < 1) lsHp = 1;
+                if (lsPct > 0) { lsHp = ceilDiv100(d * lsPct);
                                  gp.hp += lsHp; if (gp.hp > gp.hpMax) gp.hp = gp.hpMax;
                                  hitLine(hitP, "lifesteal %d%%  +%d hp", lsPct, lsHp); }
             }
@@ -559,8 +556,7 @@ static const int SKM_W = 200, SKM_ROWH = 28, SKM_VIS = 5;
 static const int SKM_H = 34 + SKM_VIS * SKM_ROWH;
 static void drawSkillMenu(const int *ids, int n, int sel, int top, int x0, int y0)
 {
-    tft->fillRoundRect(x0, y0, SKM_W, SKM_H, 10, COL_BG);
-    tft->drawRoundRect(x0, y0, SKM_W, SKM_H, 10, COL_GREEN);
+    modalPanel(x0, y0, SKM_W, SKM_H, 10, COL_GREEN);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
     char b[32];
@@ -600,13 +596,11 @@ static int skillMenu()
     int x0 = (SCR_W - SKM_W) / 2, y0 = (SCR_H - SKM_H) / 2, sel = 0, top = 0;
 
     // Дождаться отпускания пальца (которым нажали Skill), затем слушать.
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     drawSkillMenu(ids, n, sel, top, x0, y0);
     for (;;) {
         int16_t x, y;
-        InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) return -1;
         if (e == EVT_UP || e == EVT_DOWN) {
             ListNav l{n, SKM_VIS, sel, top};
@@ -616,7 +610,76 @@ static int skillMenu()
             if (x < x0 || x > x0 + SKM_W || y < y0 || y > y0 + SKM_H) return -1;   // тап мимо — отмена
             return ids[sel];                                                      // применить выделенный
         }
-        delay(20);
+    }
+}
+
+// Зелье полезно прямо сейчас? (HP полное / MP полное — бесполезно, рисуем тускло).
+static bool potionUsable(const Item &it)
+{
+    if (it.kind == IT_HP_POTION) return gp.hp < gp.hpMax;
+    if (it.kind == IT_MP_POTION) return gp.mp < gp.mpMax;
+    return false;
+}
+
+// Меню зелий (HP/MP) — зеркало меню навыков: список со свайпом, выделение выбранного.
+static void drawItemMenu(const int *ids, int n, int sel, int top, int x0, int y0)
+{
+    modalPanel(x0, y0, SKM_W, SKM_H, 10, COL_GREEN);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("ITEM", x0 + SKM_W / 2, y0 + 14, 2);
+    char b[32];
+    for (int r = 0; r < SKM_VIS; r++) {
+        int li = top + r; if (li >= n) break;
+        const Item &it = inv[ids[li]];
+        int yy = y0 + 28 + r * SKM_ROWH;
+        bool s = (li == sel);
+        if (s) tft->fillRoundRect(x0 + 4, yy, SKM_W - 8, SKM_ROWH - 3, 4, COL_GREEN_DIM);
+        bool aff = potionUsable(it);
+        uint16_t bg = s ? COL_GREEN_DIM : COL_BG;
+        tft->setTextDatum(ML_DATUM);
+        tft->setTextColor(aff ? COL_GREEN : (s ? COL_GREEN_HI : COL_GREEN_DIM), bg);
+        snprintf(b, sizeof(b), "%s +%d", it.name, it.power);
+        tft->drawString(b, x0 + 12, yy + (SKM_ROWH - 3) / 2, 2);
+        tft->setTextDatum(MR_DATUM);
+        tft->setTextColor(aff ? COL_AMBER : (s ? COL_GREEN_HI : COL_GREEN_DIM), bg);
+        snprintf(b, sizeof(b), "x%d", it.count);
+        tft->drawString(b, x0 + SKM_W - 10, yy + (SKM_ROWH - 3) / 2, 1);
+    }
+    if (n > SKM_VIS) {                                  // индикатор прокрутки
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        tft->drawString("swipe", x0 + SKM_W / 2, y0 + SKM_H - 8, 1);
+    }
+}
+
+// Модальное меню зелий (свайп — выбор, тап — применить). -1 = отмена/нет зелий.
+// Возвращает индекс в inv[]; бесполезные сейчас зелья выбрать нельзя.
+static int itemMenu()
+{
+    int ids[INV_MAX], n = 0;
+    for (int i = 0; i < invCount; i++)
+        if (inv[i].kind == IT_HP_POTION || inv[i].kind == IT_MP_POTION) ids[n++] = i;
+    if (n == 0) { strcpy(logP, "no potions"); return -1; }
+
+    int x0 = (SCR_W - SKM_W) / 2, y0 = (SCR_H - SKM_H) / 2, sel = 0, top = 0;
+
+    // Дождаться отпускания пальца (которым нажали Item), затем слушать.
+    modalBegin();
+    drawItemMenu(ids, n, sel, top, x0, y0);
+    for (;;) {
+        int16_t x, y;
+        InputEvent e = modalPoll(x, y);
+        if (e == EVT_BACK) return -1;
+        if (e == EVT_UP || e == EVT_DOWN) {
+            ListNav l{n, SKM_VIS, sel, top};
+            if (listNavEvent(l, e)) { sel = l.sel; top = l.top; drawItemMenu(ids, n, sel, top, x0, y0); }
+        }
+        else if (e == EVT_TAP) {
+            if (x < x0 || x > x0 + SKM_W || y < y0 || y > y0 + SKM_H) return -1;   // тап мимо — отмена
+            if (!potionUsable(inv[ids[sel]])) continue;                           // бесполезное — игнор
+            return ids[sel];                                                      // применить выделенное
+        }
     }
 }
 
@@ -665,8 +728,7 @@ CombatResult combatRun(Monster &mon)
 
     // Дождаться отпускания пальца (которым вошли в бой), иначе его release
     // сразу нажмёт кнопку (стрелка вниз совпадает по месту с кнопками).
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
 
     for (;;) {
         int16_t x, y;
@@ -690,11 +752,18 @@ CombatResult combatRun(Monster &mon)
             int sk = skillMenu();
             if (sk < 0 || !castSkill(sk, mon)) tookTurn = false;
         }
-        else if (act == 2) {                            // Item — зелье HP
-            int pi = invFindHpPotion();
-            int h0 = gp.hp;
-            if (pi >= 0 && invUse(pi)) { snprintf(logP, sizeof(logP), "YOU: +%d hp", gp.hp - h0); soundBeep(820, 50); }
-            else { strcpy(logP, pi < 0 ? "no potion" : "hp full"); tookTurn = false; }
+        else if (act == 2) {                            // Item — меню зелий (HP/MP)
+            int ii = itemMenu();
+            if (ii < 0) tookTurn = false;               // нет зелий / отмена — ход не тратится
+            else {
+                int h0 = gp.hp, m0 = gp.mp;
+                if (invUse(ii)) {
+                    int dh = gp.hp - h0, dm = gp.mp - m0;
+                    if (dh) snprintf(logP, sizeof(logP), "YOU: +%d hp", dh);
+                    else    snprintf(logP, sizeof(logP), "YOU: +%d mp", dm);
+                    soundBeep(820, 50);
+                } else { strcpy(logP, "no effect"); tookTurn = false; }
+            }
         }
         else {                                          // Run (побег)
             if ((int)random(100) < fleeChance(mon)) return CR_FLEE;

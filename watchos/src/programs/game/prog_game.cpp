@@ -14,6 +14,7 @@
 #include "../../../input.h"
 #include "../../../sound.h"
 #include "../../../listnav.h"
+#include "../../../modal.h"
 
 // Управление: тап по стрелке-зоне → шаг; удержание → автоповтор.
 static const int      HIT_R      = 24;    // полуразмер хит-зоны вокруг стрелки, px
@@ -69,25 +70,13 @@ static void drawHud()
     for (int i = 0; i < 3; i++) tft->drawFastHLine(mx + 8, my + 6 + i * 5, mw - 16, COL_AMBER);
 }
 
-// Большая кнопка CLOSE внизу экрана (вместо мелкого углового X — по ней легко попасть).
-static const int CLOSE_BY = 212, CLOSE_BH = 26;
-static void drawCloseBtn()
-{
-    tft->fillRoundRect(56, CLOSE_BY, SCR_W - 112, CLOSE_BH, 7, COL_BG);
-    tft->drawRoundRect(56, CLOSE_BY, SCR_W - 112, CLOSE_BH, 7, COL_AMBER);
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("CLOSE", SCR_W / 2, CLOSE_BY + CLOSE_BH / 2, 2);
-}
-static bool hitClose(int16_t y) { return y >= CLOSE_BY - 8; }   // широкая нижняя зона
 
 // Окно награды после победы — поверх экрана боя (скруглённое).
 static void rewardDialog(const Monster &m, int prevLevel)
 {
     bool lvUp = gp.level > prevLevel;
     const int w = 188, h = lvUp ? 132 : 100, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
     tft->drawRoundRect(x0 + 2, y0 + 2, w - 4, h - 4, 10, COL_GREEN_DIM);
 
     tft->setTextDatum(MC_DATUM);
@@ -148,8 +137,7 @@ static uint32_t chestSeed(int32_t x, int32_t y)
 static void lootDialog(const Item &it, bool added)
 {
     const int w = 188, h = 96, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
     tft->drawString(added ? "TREASURE" : "FULL!", SCR_W / 2, y0 + 22, 4);
@@ -184,8 +172,7 @@ static void lootDialog(const Item &it, bool added)
 static void infoDialog(const char *title, const char *msg, uint16_t titleCol)
 {
     const int w = 184, h = 92, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(titleCol, COL_BG);
     tft->drawString(title, SCR_W / 2, y0 + 26, 4);
@@ -257,32 +244,78 @@ static void effectDescStr(const Item &it, char *out, int n)
     snprintf(out, n, "%s +%d%s", ef, it.effMag, pct ? "%" : "");
 }
 
-// Диалог с полными характеристиками предмета + 2 кнопки (verb / Cancel).
+// Один столбец карточки предмета: заголовок, имя (цветом редкости), редкость, ATK/DEF, эффект,
+// [цена]. powCol/effCol — цвета статов (для выбранного предмета подсвечивают «лучше/хуже»).
+static void drawItemCol(int cx, int y0, const char *hdr, const Item &it,
+                        uint16_t powCol, uint16_t effCol, int price)
+{
+    char b[24];
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);                                     tft->drawString(hdr, cx, y0 + 12, 1);
+    tft->setTextColor(rarityColor(it.rarity), COL_BG);                       tft->drawString(it.name, cx, y0 + 28, 1);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);                                tft->drawString(rarityName(it.rarity), cx, y0 + 42, 1);
+    snprintf(b, sizeof(b), "%s %d", it.kind == IT_WEAPON ? "ATK" : "DEF", it.power);
+    tft->setTextColor(powCol, COL_BG);                                       tft->drawString(b, cx, y0 + 64, 2);
+    char ee[24]; effectDescStr(it, ee, sizeof(ee));
+    tft->setTextColor(effCol, COL_BG);                                       tft->drawString(ee[0] ? ee : "-", cx, y0 + 86, 1);
+    if (price >= 0) {
+        char ps[12]; goldStr(price, ps, sizeof(ps));
+        snprintf(b, sizeof(b), "%sg", ps);
+        tft->setTextColor(COL_AMBER, COL_BG);                                tft->drawString(b, cx, y0 + 104, 2);
+    }
+}
+
+// Диалог с характеристиками предмета + 2 кнопки (verb / Cancel). Для оружия/брони при наличии
+// надетого предмета того же слота показывает ДВЕ колонки: слева Equipped, справа Selected (полное
+// сравнение, статы выбранного подсвечены лучше/хуже). Зелья и сам надетый предмет — одиночная карточка.
 // enabled=false → кнопка действия неактивна (серая, тап игнорируется). Возврат: true = подтверждено.
 static bool itemDetailDialog(const Item &it, int price, const char *verb, bool enabled)
 {
-    const int w = 212, h = 156, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
-    tft->fillRoundRect(x0, y0, w, h, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, w, h, 12, COL_AMBER);
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(rarityColor(it.rarity), COL_BG);
-    tft->drawString(it.name, SCR_W / 2, y0 + 22, 2);
-    tft->setTextColor(COL_GREEN_DIM, COL_BG);
-    tft->drawString(rarityName(it.rarity), SCR_W / 2, y0 + 42, 1);
+    const Item *eq = nullptr;
+    if      (it.kind == IT_WEAPON && hasWeapon) eq = &equWeapon;
+    else if (it.kind == IT_ARMOR  && hasArmor)  eq = &equArmor;
+    bool cmp = eq && !(eq->power == it.power && eq->effect == it.effect &&
+                       eq->effMag == it.effMag && strcmp(eq->name, it.name) == 0);
+    const uint16_t COL_BETTER = COL_GREEN_HI;
+    const uint16_t COL_WORSE  = RGB565(0xFF, 0x44, 0x44);
 
-    char b[40];
-    tft->setTextDatum(ML_DATUM);
-    tft->setTextColor(COL_GREEN, COL_BG);
-    itemBonusStr(it, b, sizeof(b));
-    tft->drawString(b, x0 + 18, y0 + 64, 2);
-    char eff[28]; effectDescStr(it, eff, sizeof(eff));
-    if (eff[0]) { tft->setTextColor(COL_AMBER, COL_BG); tft->drawString(eff, x0 + 18, y0 + 86, 2); }
+    const int w = cmp ? 228 : 212, h = cmp ? 184 : 156;
+    const int x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
+    char b[44];
 
-    tft->setTextDatum(MR_DATUM);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    char ps[12]; goldStr(price, ps, sizeof(ps));
-    snprintf(b, sizeof(b), "%sg", ps);
-    tft->drawString(b, x0 + w - 18, y0 + 64, 4);
+    if (cmp) {                                      // ── две колонки: Equipped | Selected ──
+        int dPow = it.power - eq->power;
+        uint16_t powCol = dPow > 0 ? COL_BETTER : dPow < 0 ? COL_WORSE : COL_GREEN;
+        uint16_t effCol = COL_AMBER;
+        if (it.effect != EF_NONE && it.effect == eq->effect) {   // подсветка эффекта — при том же типе
+            int dEff = it.effMag - eq->effMag;
+            effCol = dEff > 0 ? COL_BETTER : dEff < 0 ? COL_WORSE : COL_AMBER;
+        }
+        int mid = SCR_W / 2;
+        tft->drawFastVLine(mid, y0 + 10, h - 56, COL_FRAME);
+        drawItemCol((x0 + mid) / 2,     y0, "EQUIPPED", *eq, COL_GREEN, COL_AMBER, -1);
+        drawItemCol((mid + x0 + w) / 2, y0, "SELECTED", it,  powCol,    effCol,    price);
+    } else {                                        // ── одиночная карточка (зелье/надетое/пусто) ──
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(rarityColor(it.rarity), COL_BG);
+        tft->drawString(it.name, SCR_W / 2, y0 + 22, 2);
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        tft->drawString(rarityName(it.rarity), SCR_W / 2, y0 + 42, 1);
+        tft->setTextDatum(ML_DATUM);
+        tft->setTextColor(COL_GREEN, COL_BG);
+        itemBonusStr(it, b, sizeof(b));
+        tft->drawString(b, x0 + 18, y0 + 64, 2);
+        char eff[28]; effectDescStr(it, eff, sizeof(eff));
+        if (eff[0]) { tft->setTextColor(COL_AMBER, COL_BG); tft->drawString(eff, x0 + 18, y0 + 86, 2); }
+        if (price >= 0) {
+            tft->setTextDatum(MR_DATUM);
+            tft->setTextColor(COL_AMBER, COL_BG);
+            char ps[12]; goldStr(price, ps, sizeof(ps));
+            snprintf(b, sizeof(b), "%sg", ps);
+            tft->drawString(b, x0 + w - 18, y0 + 64, 4);
+        }
+    }
 
     const int bw = 84, bh = 30, by = y0 + h - bh - 12;
     const int yx = x0 + 14, cx = x0 + w - 14 - bw;
@@ -291,11 +324,9 @@ static bool itemDetailDialog(const Item &it, int price, const char *verb, bool e
     tft->drawRoundRect(yx, by, bw, bh, 6, vc);  tft->setTextColor(vc, COL_BG); tft->drawString(verb, yx + bw / 2, by + bh / 2, 2);
     tft->drawRoundRect(cx, by, bw, bh, 6, COL_AMBER);  tft->setTextColor(COL_AMBER, COL_BG); tft->drawString("Cancel", cx + bw / 2, by + bh / 2, 2);
 
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) return false;
         if (e == EVT_TAP) {
             if (y >= by && y <= by + bh) {
@@ -304,7 +335,6 @@ static bool itemDetailDialog(const Item &it, int price, const char *verb, bool e
             }
             if (x < x0 || x > x0 + w || y < y0 || y > y0 + h) return false;
         }
-        delay(20);
     }
 }
 static const char *MTAB[5] = { "WEAPONS", "ARMOR", "POTIONS", "SELL", "UPGRADE" };
@@ -331,7 +361,20 @@ static bool merchResolve(int tab, int v, int depth, Item &it, long &price)
     if (tab == 3) { it = inv[v]; price = itemSellValue(it); return true; }
     it = itemScaled(ITEM_DB[v], depth); price = it.price; return true;
 }
-static const int M_TOP = 54, M_ROWH = 32, M_VIS = 4, M_NAVY = 210, M_NAVH = 26;
+static const int M_TOP = 54, M_ROWH = 38, M_VIS = 4, M_NAVY = 210, M_NAVH = 26;
+
+// Нижний нав-бар вкладок: [< Prev]  [CLOSE]  [Next >] — общий для торговца и инвентаря.
+static void drawTabNavbar()
+{
+    tft->drawRoundRect(8, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
+    tft->drawRoundRect(SCR_W - 84, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
+    tft->drawRoundRect(94, M_NAVY, 52, M_NAVH, 6, COL_AMBER);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("< Prev", 46, M_NAVY + M_NAVH / 2, 1);
+    tft->drawString("Next >", SCR_W - 46, M_NAVY + M_NAVH / 2, 1);
+    tft->drawString("CLOSE", SCR_W / 2, M_NAVY + M_NAVH / 2, 1);
+}
 
 // Список индексов для вкладки: оружие/броня — окно тиров по глубине; зелья — все;
 // продажа — инвентарь; апгрейд — экипировка.
@@ -403,29 +446,22 @@ static void drawMerchant(int tab, int sel, int top, const char *fb)
         tft->drawString(b, SCR_W - 8, yy + rh / 2, 2);
     }
 
-    tft->setTextDatum(MC_DATUM);
-    if (fb && fb[0]) { tft->setTextColor(COL_GREEN_HI, COL_BG); tft->drawString(fb, SCR_W / 2, 188, 1); }
-    else { tft->setTextColor(COL_GREEN_DIM, COL_BG); tft->drawString("swipe < > : tabs", SCR_W / 2, 188, 1); }
+    if (fb && fb[0]) {                              // фидбэк наверху, под gold/bag (строки крупнее → низ занят)
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_GREEN_HI, COL_BG);
+        tft->drawString(fb, SCR_W / 2, 44, 1);
+    }
 
-    // Нижний нав-бар: [< Prev]  [CLOSE]  [Next >]
-    tft->drawRoundRect(8, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
-    tft->drawRoundRect(SCR_W - 84, M_NAVY, 76, M_NAVH, 6, COL_AMBER);
-    tft->drawRoundRect(94, M_NAVY, 52, M_NAVH, 6, COL_AMBER);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("< Prev", 46, M_NAVY + M_NAVH / 2, 1);
-    tft->drawString("Next >", SCR_W - 46, M_NAVY + M_NAVH / 2, 1);
-    tft->drawString("CLOSE", SCR_W / 2, M_NAVY + M_NAVH / 2, 1);
+    drawTabNavbar();
 }
 
 static void merchantScreen()
 {
     int tab = 0, sel = 0, top = 0; char fb[24] = "";
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     drawMerchant(tab, sel, top, fb);
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) return;
         int idx[64]; int n = merchList(tab, idx);
 
@@ -476,7 +512,6 @@ static void merchantScreen()
             drawMerchant(tab, sel, top, fb);
             continue;
         }
-        delay(20);
     }
 }
 
@@ -486,8 +521,7 @@ static const int FLD_BW = 84, FLD_BH = 30;
 
 static void drawFloorDialog(int sel, int x0, int y0)
 {
-    tft->fillRoundRect(x0, y0, FLD_W, FLD_H, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, FLD_W, FLD_H, 12, COL_AMBER);
+    modalPanel(x0, y0, FLD_W, FLD_H, 12, COL_AMBER);
     char b[32];
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
@@ -523,8 +557,7 @@ static int floorSelectDialog()
     int sel = gFloor;
     const int x0 = (SCR_W - FLD_W) / 2, y0 = (SCR_H - FLD_H) / 2;
     drawFloorDialog(sel, x0, y0);
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     const int by = y0 + FLD_H - FLD_BH - 12;
     const int gx = x0 + 14, cx = x0 + FLD_W - 14 - FLD_BW;
     for (;;) {
@@ -909,8 +942,7 @@ static void drawSkillInfo(int id)
     }
 
     const int x0 = (SCR_W - SKI_W) / 2, y0 = (SCR_H - SKI_H) / 2;
-    tft->fillRoundRect(x0, y0, SKI_W, SKI_H, 12, COL_BG);
-    tft->drawRoundRect(x0, y0, SKI_W, SKI_H, 12, passive ? COL_AMBER : COL_GREEN);
+    modalPanel(x0, y0, SKI_W, SKI_H, 12, passive ? COL_AMBER : COL_GREEN);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(passive ? COL_AMBER : COL_GREEN_HI, COL_BG);
     tft->drawString(s.name, SCR_W / 2, y0 + 20, 4);
@@ -944,8 +976,7 @@ static bool skillInfoDialog(int id)
     const int by = y0 + SKI_H - SKI_BH - 12;
     const int ux = x0 + 14, cx = x0 + SKI_W - 14 - SKI_BW;
     drawSkillInfo(id);
-    { int16_t wx, wy; uint32_t t = millis(); while (watch->getTouch(wx, wy) && millis() - t < 1500) delay(10); }
-    inputBegin();
+    modalBegin();
     for (;;) {
         int16_t x, y; InputEvent e = inputPoll(x, y);
         if (e != EVT_NONE) powerNoteActivity();
@@ -1057,87 +1088,156 @@ static void characterScreen()
     }
 }
 
-// ───── Инвентарь (модальный) ─────
-static const int INV_TOP = 58, INV_ROWH = 22, INV_VIS = 5;
+// ───── Инвентарь: тот же интерфейс с вкладками, что у торговца ─────
+// Вкладки Weapons/Armor/Potions (имена берём из MTAB[0..2]). Свайп ←/→ + навбар.
+#define INV_TABS 3
 
-static void drawInv(int sel, int top, const char *fb = nullptr)
+// Список строк вкладки. Кодирование строки: -1 = надетое оружие, -2 = надетая броня,
+// >= 0 — индекс inv[]. Надетый предмет идёт первой (закреплённой) строкой своей вкладки.
+static int invTabList(int tab, int *out)
+{
+    int n = 0;
+    if (tab == 0) {                                 // Weapons
+        if (hasWeapon) out[n++] = -1;
+        for (int i = 0; i < invCount; i++) if (inv[i].kind == IT_WEAPON) out[n++] = i;
+    } else if (tab == 1) {                          // Armor
+        if (hasArmor) out[n++] = -2;
+        for (int i = 0; i < invCount; i++) if (inv[i].kind == IT_ARMOR) out[n++] = i;
+    } else {                                        // Potions
+        for (int i = 0; i < invCount; i++)
+            if (inv[i].kind == IT_HP_POTION || inv[i].kind == IT_MP_POTION) out[n++] = i;
+    }
+    return n;
+}
+
+// Резолв кода строки в предмет; equipped=true для надетого (-1/-2).
+static const Item &invRowItem(int code, bool &equipped)
+{
+    equipped = (code < 0);
+    if (code == -1) return equWeapon;
+    if (code == -2) return equArmor;
+    return inv[code];
+}
+
+// Зелье полезно прямо сейчас? (HP/MP полные → бесполезно; снаряжение всегда «да»).
+static bool invRowUsable(const Item &it)
+{
+    if (it.kind == IT_HP_POTION) return gp.hp < gp.hpMax;
+    if (it.kind == IT_MP_POTION) return gp.mp < gp.mpMax;
+    return true;
+}
+
+static void drawInvTab(int tab, int sel, int top, const char *fb)
 {
     tft->fillScreen(COL_BG);
+    char b[44];
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("INVENTORY", SCR_W / 2, 12, 2);
-
-    char b[44];
-    tft->setTextDatum(ML_DATUM);
+    snprintf(b, sizeof(b), "INV - %s", MTAB[tab]);
+    tft->drawString(b, SCR_W / 2, 12, 2);
     tft->setTextColor(COL_GREEN, COL_BG);
-    snprintf(b, sizeof(b), "Wpn:%s +%d", hasWeapon ? equWeapon.name : "-", playerAtkBonus());
-    tft->drawString(b, 6, 32, 1);
-    snprintf(b, sizeof(b), "Arm:%s +%d", hasArmor ? equArmor.name : "-", playerDefBonus());
-    tft->drawString(b, 6, 44, 1);
+    snprintf(b, sizeof(b), "Bag %d/%d", invCount, INV_MAX);
+    tft->drawString(b, SCR_W / 2, 32, 1);
 
-    if (invCount == 0) {
-        tft->setTextDatum(MC_DATUM);
+    int idx[INV_MAX + 2]; int n = invTabList(tab, idx);
+    if (n == 0) {
         tft->setTextColor(COL_GREEN_DIM, COL_BG);
-        tft->drawString("empty", SCR_W / 2, 120, 4);
-        drawCloseBtn();
-        return;
+        tft->drawString("empty", SCR_W / 2, 110, 2);
     }
-    for (int r = 0; r < INV_VIS; r++) {
-        int i = top + r; if (i >= invCount) break;
-        int yy = INV_TOP + r * INV_ROWH;
-        bool s = (i == sel);
-        if (s) tft->fillRoundRect(4, yy, SCR_W - 8, INV_ROWH - 3, 4, COL_GREEN_DIM);
-        char info[14];
-        if (inv[i].kind == IT_WEAPON)      snprintf(info, sizeof(info), "A%d", inv[i].power);
-        else if (inv[i].kind == IT_ARMOR)  snprintf(info, sizeof(info), "D%d", inv[i].power);
-        else if (inv[i].count > 1)         snprintf(info, sizeof(info), "+%d x%d", inv[i].power, inv[i].count);
-        else                               snprintf(info, sizeof(info), "+%d", inv[i].power);
-        snprintf(b, sizeof(b), "%s %s", inv[i].name, info);
+    for (int r = 0; r < M_VIS; r++) {
+        int li = top + r; if (li >= n) break;
+        int yy = M_TOP + r * M_ROWH;
+        bool s = (li == sel);
+        if (s) tft->fillRoundRect(4, yy, SCR_W - 8, M_ROWH - 3, 4, COL_GREEN_DIM);
+        bool eq; const Item &it = invRowItem(idx[li], eq);
+        bool usable = invRowUsable(it);
+        uint16_t bg = s ? COL_GREEN_DIM : COL_BG;
+        uint16_t dim = s ? COL_GREEN_HI : COL_GREEN_DIM;
+        int rh = M_ROWH - 3;
+        // строка 1: название цветом редкости (тускло, если зелье бесполезно сейчас)
         tft->setTextDatum(ML_DATUM);
-        tft->setTextColor(rarityColor(inv[i].rarity), s ? COL_GREEN_DIM : COL_BG);
-        tft->drawString(b, 8, yy + (INV_ROWH - 3) / 2, 2);
-        // эффект (если есть) — мелкой меткой справа
-        const char *ef = effectName(inv[i].effect);
-        if (ef[0]) { tft->setTextDatum(MR_DATUM); tft->setTextColor(COL_AMBER, s ? COL_GREEN_DIM : COL_BG);
-                     tft->drawString(ef, SCR_W - 8, yy + (INV_ROWH - 3) / 2, 1); }
+        tft->setTextColor(usable ? rarityColor(it.rarity) : dim, bg);
+        tft->drawString(it.name, 8, yy + 9, 2);
+        // строка 2: бонус и эффект
+        char bon[12]; itemBonusStr(it, bon, sizeof(bon));
+        const char *ef = effectName(it.effect);
+        char sub[24];
+        if (ef[0]) snprintf(sub, sizeof(sub), "%s [%s]", bon, ef);
+        else       snprintf(sub, sizeof(sub), "%s", bon);
+        tft->setTextColor(dim, bg);
+        tft->drawString(sub, 10, yy + 24, 1);
+        // правый столбец: [E] для надетого, xN для стопки зелий
+        tft->setTextDatum(MR_DATUM);
+        if (eq) {
+            tft->setTextColor(COL_AMBER, bg);
+            tft->drawString("[E]", SCR_W - 8, yy + rh / 2, 2);
+        } else if (it.count > 1) {
+            tft->setTextColor(dim, bg);
+            snprintf(b, sizeof(b), "x%d", it.count);
+            tft->drawString(b, SCR_W - 8, yy + rh / 2, 2);
+        }
     }
 
-    tft->setTextDatum(MC_DATUM);
-    if (fb) {
+    if (fb && fb[0]) {                              // фидбэк наверху, под gold/bag (строки крупнее → низ занят)
+        tft->setTextDatum(MC_DATUM);
         tft->setTextColor(COL_GREEN_HI, COL_BG);
-        tft->drawString(fb, SCR_W / 2, 206, 1);
+        tft->drawString(fb, SCR_W / 2, 44, 1);
     }
-    drawCloseBtn();
+
+    drawTabNavbar();
 }
 
 static void inventoryScreen()
 {
-    int sel = 0, top = 0;
-    char fb[24] = "";
-    drawInv(sel, top);
+    int tab = 0, sel = 0, top = 0; char fb[24] = "";
+    modalBegin();
+    drawInvTab(tab, sel, top, fb);
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) return;
-        if (e == EVT_TAP && hitClose(y)) return;   // нижняя кнопка CLOSE
-        if (invCount == 0) { if (e == EVT_TAP) return; delay(20); continue; }
+        int idx[INV_MAX + 2]; int n = invTabList(tab, idx);
 
+        if (e == EVT_LEFT || e == EVT_RIGHT) {          // свайп — смена вкладки
+            tab = (tab + (e == EVT_RIGHT ? 1 : INV_TABS - 1)) % INV_TABS; sel = top = 0; fb[0] = 0;
+            drawInvTab(tab, sel, top, fb); continue;
+        }
         if (e == EVT_UP || e == EVT_DOWN) {
-            ListNav l{invCount, INV_VIS, sel, top};
-            if (listNavEvent(l, e)) { sel = l.sel; top = l.top; fb[0] = 0; drawInv(sel, top); }
+            ListNav l{n, M_VIS, sel, top};
+            if (listNavEvent(l, e)) { sel = l.sel; top = l.top; drawInvTab(tab, sel, top, fb); }
+            continue;
         }
-        else if (e == EVT_TAP) {                    // применить ВЫДЕЛЕННЫЙ предмет (надеть/выпить)
-            Item &it = inv[sel];
-            if (itemIsGear(it)) { invEquip(sel); fb[0] = 0; }
-            else if (!invUse(sel)) strcpy(fb, it.kind == IT_HP_POTION ? "HP already full" : "MP already full");
-            else fb[0] = 0;
-            if (sel >= invCount) sel = invCount - 1;
-            if (sel < 0) sel = 0;
-            if (sel < top) top = sel;
-            if (invCount == 0) return;              // всё использовано — выходим
-            drawInv(sel, top, fb[0] ? fb : nullptr);
+        if (e == EVT_TAP) {
+            if (y >= M_NAVY) {                          // нижний нав-бар
+                if (x < 88) { tab = (tab + INV_TABS - 1) % INV_TABS; sel = top = 0; fb[0] = 0; drawInvTab(tab, sel, top, fb); }
+                else if (x > SCR_W - 88) { tab = (tab + 1) % INV_TABS; sel = top = 0; fb[0] = 0; drawInvTab(tab, sel, top, fb); }
+                else return;                            // центр — CLOSE
+                continue;
+            }
+            if (n == 0) continue;
+            bool eq; const Item &it = invRowItem(idx[sel], eq);
+            if (eq) {                                   // надетое — только просмотр статов
+                itemDetailDialog(it, -1, "Equipped", false);
+            } else if (itemIsGear(it)) {                // снаряжение — надеть
+                if (itemDetailDialog(it, -1, "Equip", true)) {
+                    invEquip(idx[sel]); strcpy(fb, "equipped"); soundBeep(820, 50);
+                    sel = top = 0;                      // список перестроился (предмет ушёл в [E])
+                }
+            } else {                                    // зелье — выпить
+                bool usable = invRowUsable(it);
+                if (itemDetailDialog(it, -1, "Use", usable)) {
+                    int h0 = gp.hp, m0 = gp.mp;
+                    if (invUse(idx[sel])) {
+                        int dh = gp.hp - h0, dm = gp.mp - m0;
+                        snprintf(fb, sizeof(fb), dh ? "+%d HP" : "+%d MP", dh ? dh : dm);
+                        soundBeep(820, 50);
+                        n = invTabList(tab, idx);       // стопка уменьшилась/строка ушла — поправим sel
+                        if (sel >= n) sel = n - 1; if (sel < 0) sel = 0; if (sel < top) top = sel;
+                    }
+                }
+            }
+            drawInvTab(tab, sel, top, fb);
+            continue;
         }
-        delay(20);
     }
 }
 
@@ -1145,8 +1245,7 @@ static void inventoryScreen()
 static const int GM_W = 162, GM_H = 150, GM_X0 = (SCR_W - 162) / 2, GM_Y0 = 44;
 static void drawGameMenu(int sel)
 {
-    tft->fillRoundRect(GM_X0, GM_Y0, GM_W, GM_H, 12, COL_BG);
-    tft->drawRoundRect(GM_X0, GM_Y0, GM_W, GM_H, 12, COL_GREEN);
+    modalPanel(GM_X0, GM_Y0, GM_W, GM_H, 12, COL_GREEN);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
     tft->drawString("MENU", SCR_W / 2, GM_Y0 + 16, 2);
@@ -1167,8 +1266,7 @@ static void gameMenu()
     ListNav l{3, 0, 0, 0};                       // свайп ↑↓ — выбор, тап — выбрать активный
     drawGameMenu(l.sel);
     for (;;) {
-        int16_t x, y; InputEvent e = inputPoll(x, y);
-        if (e != EVT_NONE) powerNoteActivity();
+        int16_t x, y; InputEvent e = modalPoll(x, y);
         if (e == EVT_BACK) { kernelRedraw(); return; }
         if (e == EVT_UP || e == EVT_DOWN) { if (listNavEvent(l, e)) drawGameMenu(l.sel); continue; }
         if (e == EVT_TAP) {
@@ -1177,7 +1275,6 @@ static void gameMenu()
             if (l.sel == 1) { characterScreen(); gameSaveNow(); kernelRedraw(); return; }   // очки статов/навыков
             kernelBack(); return;                // Exit
         }
-        delay(20);
     }
 }
 
