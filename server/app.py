@@ -65,6 +65,14 @@ async def talk(session: str, request: Request):
     return JSONResponse({"url": url})
 
 
+@app.get("/speedtest/ping")
+def speedtest_ping(request: Request):
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return Response(content=b"ok", media_type="text/plain")
+
+
 @app.get("/audio/{session_id}/{name}")
 def audio(session_id: str, name: str):
     settings = get_settings()

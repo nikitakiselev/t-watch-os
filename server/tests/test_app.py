@@ -149,3 +149,17 @@ def test_audio_rejects_encoded_dotdot_session(tmp_path, monkeypatch):
     c = make_client(tmp_path, monkeypatch)
     r = c.get("/audio/%2e%2e/0.mp3")
     assert r.status_code == 400
+
+
+def test_speedtest_ping_ok(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    r = c.get("/speedtest/ping")
+    assert r.status_code == 200
+    assert r.content == b"ok"
+
+
+def test_speedtest_ping_requires_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    c = make_client(tmp_path, monkeypatch)
+    assert c.get("/speedtest/ping").status_code == 401
+    assert c.get("/speedtest/ping", headers={"X-API-Key": "secret123"}).status_code == 200
