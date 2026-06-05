@@ -100,7 +100,12 @@ Item itemScaled(const ItemDef &d, int depth)
     int m10 = 10 + depth;                                 // множитель ×(1 + depth/10)
     it.power  = (int16_t)((long)d.power  * m10 / 10);
     it.effMag = (int16_t)(effectIsFlat(d.effect) ? (long)d.effMag * m10 / 10 : d.effMag);
-    it.price  = (int32_t)((long)d.price * m10 / 10 * m10 / 10);   // цена ~ глубина² → сток золота
+    // Снаряжение: цена ~ глубина² → сток золота. Зелья: цена ЛИНЕЙНА по глубине, как и
+    // лечение (power) — иначе gold/HP дешевле на верхних этажах и выгодно закупаться внизу
+    // и таскать стопку зелий (абсолютный расходник). Линейно → отношение цена/лечение константа.
+    bool potion = (d.kind == IT_HP_POTION || d.kind == IT_MP_POTION);
+    it.price = potion ? (int32_t)((long)d.price * m10 / 10)
+                      : (int32_t)((long)d.price * m10 / 10 * m10 / 10);
     return it;
 }
 
