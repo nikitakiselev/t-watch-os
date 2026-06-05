@@ -1,5 +1,24 @@
+import array
 import struct
 import subprocess
+
+
+def normalize_lpcm(pcm: bytes, target_peak: float = 0.9, max_gain: float = 16.0) -> bytes:
+    # Пиковая нормализация 16-бит LPCM: поднять громкость до target_peak от шкалы,
+    # но не больше max_gain (чтобы тишину/шум не раздувать). PDM-мик тихий — так
+    # сохранённую запись слышно нормально. На STT не влияет (там исходник).
+    samples = array.array("h")           # signed 16-bit, порядок байт — нативный (LE на сервере)
+    samples.frombytes(pcm[:len(pcm) - (len(pcm) % 2)])   # чётное число байт (на всякий случай)
+    if not samples:
+        return pcm
+    peak = max(abs(s) for s in samples)
+    if peak == 0:
+        return pcm
+    gain = min((target_peak * 32767.0) / peak, max_gain)
+    if gain <= 1.0:
+        return pcm                       # уже достаточно громко
+    out = array.array("h", (max(-32768, min(32767, int(s * gain))) for s in samples))
+    return out.tobytes()
 
 
 def lpcm_to_wav(pcm: bytes, sample_rate: int = 16000, channels: int = 1,

@@ -14,9 +14,9 @@ def _build_messages(settings: Settings, history: list) -> list:
 
 
 def process_turn(settings: Settings, session_id: str, audio_lpcm: bytes):
-    # 1. Сохраняем входящую запись как lossless WAV (для отладки/прослушивания в истории).
+    # 1. Сохраняем входящую запись как WAV (нормализуем громкость — PDM-мик тихий).
     user_wav = sessions.next_user_audio_path(settings.data_dir, session_id)
-    user_wav.write_bytes(audio.lpcm_to_wav(audio_lpcm))
+    user_wav.write_bytes(audio.lpcm_to_wav(audio.normalize_lpcm(audio_lpcm)))
 
     # 2. STT. Ход пользователя пишем всегда (даже если не распознано — запись слышна в истории).
     user_text = yandex.stt_recognize(
