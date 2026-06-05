@@ -163,3 +163,21 @@ def test_speedtest_ping_requires_api_key_when_set(tmp_path, monkeypatch):
     c = make_client(tmp_path, monkeypatch)
     assert c.get("/speedtest/ping").status_code == 401
     assert c.get("/speedtest/ping", headers={"X-API-Key": "secret123"}).status_code == 200
+
+
+def test_speedtest_down_streams(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    # бесконечный стрим — читаем только первый чанк и закрываем соединение
+    with c.stream("GET", "/speedtest/down") as r:
+        assert r.status_code == 200
+        got = next(r.iter_bytes())
+        assert len(got) > 0
+
+
+def test_speedtest_down_requires_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    c = make_client(tmp_path, monkeypatch)
+    with c.stream("GET", "/speedtest/down") as r:
+        assert r.status_code == 401
+    with c.stream("GET", "/speedtest/down", headers={"X-API-Key": "secret123"}) as r:
+        assert r.status_code == 200

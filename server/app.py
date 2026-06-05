@@ -2,7 +2,7 @@ import asyncio, base64, logging, secrets, time
 import re
 from pathlib import Path
 from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from server import cleanup, pipeline, sessions
@@ -71,6 +71,30 @@ def speedtest_ping(request: Request):
     if not _api_key_ok(request, settings):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return Response(content=b"ok", media_type="text/plain")
+
+
+@app.get("/speedtest/down")
+async def speedtest_down(request: Request):
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    CHUNK = b"\0" * 16384
+    # Верхняя граница (1024 × 16 KiB = 16 MiB) — достаточно для замера нескольких
+    # секунд на скорости ESP32 WiFi; цикл прерывается раньше, когда клиент закрывает
+    # сокет (is_disconnected) или соединение рвётся (GeneratorExit/BrokenPipe).
+    MAX_CHUNKS = 1024
+
+    async def gen():
+        try:
+            for _ in range(MAX_CHUNKS):
+                if await request.is_disconnected():
+                    return
+                yield CHUNK
+        except (BrokenPipeError, ConnectionResetError, GeneratorExit):
+            return
+
+    return StreamingResponse(gen(), media_type="application/octet-stream")
 
 
 @app.get("/audio/{session_id}/{name}")
