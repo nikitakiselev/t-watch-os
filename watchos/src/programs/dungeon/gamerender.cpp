@@ -54,6 +54,16 @@ static uint8_t floorAt(int32_t wx, int32_t wy)
     return FLOORS[h % 12u];
 }
 
+// Есть ли факел на этой стене (детерминированно по координате, чтобы не «прыгал»).
+// Ставим только на ВЕРХНИЕ стены (где south=пол → тайл T_T), там видна лицевая грань.
+// ~16% таких тайлов несут факел — редко и нарядно.
+static bool torchAt(int32_t wx, int32_t wy)
+{
+    uint32_t h = (uint32_t)wx * 0x27D4EB2Fu ^ (uint32_t)wy * 0x165667B1u;
+    h ^= h >> 15;
+    return (h % 100u) < 16u;
+}
+
 // Автотайл стены (клетка-не-пол, граничит с полом). Выбор тайла по соседям-полу.
 static uint8_t wallTileAt(int32_t wx, int32_t wy)
 {
@@ -184,6 +194,10 @@ void gameRenderMap(int32_t px, int32_t py, int ox, int oy)
             if (t == TILE_WALL) {                  // стена / пустота
                 uint8_t wt = wallTileAt(wx, wy);
                 if (wt != T_VOID) blitTile(x, y, SPRITES[wt]);     // стена (непрозрачна)
+                if (wt == T_T && torchAt(wx, wy)) {                // факел на верхней стене
+                    int tf = (int)(millis() / 110) % 8;           // анимация пламени
+                    blitKeyedCentered(x, y, SPR_PX, SPRITES[SPR_TORCH + tf]);
+                }
                 continue;                          // иначе оставляем фон пустоты
             }
 
@@ -196,8 +210,10 @@ void gameRenderMap(int32_t px, int32_t py, int ox, int oy)
             else if (t == TILE_EVENT) { if (!eventTriggeredAt(wx, wy)) drawMarker(x, y, t); }
             else if (t == TILE_CAMP) drawMarker(x, y, t);
 
-            if (monsterActiveAt(wx, wy, m))         // монстр поверх пола
-                blitKeyedCentered(x, y, SPR_PX, SPRITES[SPR_MON_BASE + m.spriteId]);
+            if (monsterActiveAt(wx, wy, m)) {       // монстр поверх пола
+                int fr = (m.anim > 1) ? ((int)(millis() / 400) % m.anim) : 0;   // idle-анимация
+                blitKeyedCentered(x, y, SPR_PX, SPRITES[SPR_MON_BASE + m.spriteId + fr]);
+            }
         }
 
     // Игрок по центру вьюпорта (idle/run кадр, при взгляде влево — зеркало).

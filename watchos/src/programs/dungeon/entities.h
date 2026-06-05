@@ -10,7 +10,8 @@ const char *dmgTypeName(int t);    // короткое имя типа ("Phys"/"
 // статы масштабируются с удалением от (0,0)).
 struct Monster {
     const char *name;
-    uint8_t     spriteId;          // индекс в MON_TILES
+    uint8_t     spriteId;          // смещение спрайта от SPR_MON_BASE (атлас = SPR_MON_BASE + spriteId)
+    uint8_t     anim;              // число кадров анимации (1 = статичный; 2 = idle-анимация, кадры spriteId, spriteId+1)
     int         level;
     int         hp, hpMax;
     int         atk, def, dodge;   // dodge — шанс уклона, %

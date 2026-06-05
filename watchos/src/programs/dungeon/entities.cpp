@@ -3,20 +3,29 @@
 #include "player.h"
 #include <stdio.h>
 
-// Типы монстров (порядок = MON_TILES): имя, hp, atk, def, dodge%, xp, gold, слабость, сопротивление, мин. глубина.
+// Спрайт гоблина в атласе: SPR_GOBLIN=121 (кадры 121/122). spr — смещение от SPR_MON_BASE(101) → 20.
+#define GOBLIN_SPR 20
+
+// Типы монстров: имя, spr (смещение спрайта от SPR_MON_BASE), anim (кадров: 1 статич./2 idle),
+// hp, atk, def, dodge%, xp, gold, слабость, сопротивление, мин. глубина.
+// Для базовых монстров spr == их «сквозной» индекс спрайта (атлас 101..109), anim=1.
 // minDepth — с какой глубины этажа (|этаж|) монстр начинает встречаться. Должна НЕ убывать по индексу
-// (выбор типа опирается на это: глубже открываются всё более тяжёлые монстры).
-struct Def { const char *name; int hp, atk, def, dodge, xp, gold; int8_t weak, resist; uint8_t minDepth; };
-static const Def DEFS[9] = {
-    { "Slime",      18,  4, 1,  5,   8,   3, DMG_FIRE,   DMG_PHYS,    0 },   // 0 студень гасит удары, горит
-    { "Blue Slime", 26,  5, 2,  8,  11,   5, DMG_LIGHT,  DMG_POISON,  0 },   // 1 проводит ток, токсинам всё равно
-    { "Skeleton",   32,  7, 3,  8,  15,   7, DMG_PHYS,   DMG_POISON,  0 },   // 2 кости крошатся, плоти нет
-    { "Zombie",     46,  9, 4,  3,  22,  10, DMG_FIRE,   DMG_POISON,  0 },   // 3 нежить горит, ядом не взять
-    { "Snowman",    52, 10, 5,  6,  26,  12, DMG_FIRE,   DMG_PHYS,    5 },   // 4 тает от огня, снег держит удар
-    { "Tsargo",     64, 12, 6,  9,  32,  16, DMG_LIGHT,  DMG_FIRE,    8 },   // 5 огнеупорный, боится тока
-    { "Troll",      75, 14, 7,  5,  38,  20, DMG_FIRE,   DMG_PHYS,   12 },   // 6 регенерирует, огонь жжёт
-    { "Yeti",       90, 16, 8,  7,  48,  28, DMG_FIRE,   DMG_LIGHT,  16 },   // 7 ледяной, шерсть изолирует ток
-    { "Cyclops",   110, 19,10,  8,  62,  40, DMG_POISON, DMG_PHYS,   22 },   // 8 толстокожий, но травится ядом
+// (выбор типа опирается на это: глубже открываются всё более тяжёлые монстры). Гоблины вставлены
+// в это упорядочение по своим minDepth (10/30/50), но делят один спрайт (GOBLIN_SPR).
+struct Def { const char *name; uint8_t spr, anim; int hp, atk, def, dodge, xp, gold; int8_t weak, resist; uint8_t minDepth; };
+static const Def DEFS[12] = {
+    { "Slime",           0,1,  18,  4, 1,  5,   8,   3, DMG_FIRE,   DMG_PHYS,    0 },  // студень гасит удары, горит
+    { "Blue Slime",      1,1,  26,  5, 2,  8,  11,   5, DMG_LIGHT,  DMG_POISON,  0 },  // проводит ток, токсинам всё равно
+    { "Skeleton",        2,1,  32,  7, 3,  8,  15,   7, DMG_PHYS,   DMG_POISON,  0 },  // кости крошатся, плоти нет
+    { "Zombie",          3,1,  46,  9, 4,  3,  22,  10, DMG_FIRE,   DMG_POISON,  0 },  // нежить горит, ядом не взять
+    { "Snowman",         4,1,  52, 10, 5,  6,  26,  12, DMG_FIRE,   DMG_PHYS,    5 },  // тает от огня, снег держит удар
+    { "Tsargo",          5,1,  64, 12, 6,  9,  32,  16, DMG_LIGHT,  DMG_FIRE,    8 },  // огнеупорный, боится тока
+    { "Goblin Cutthroat", GOBLIN_SPR,2,  56, 15, 5, 22,  40,  22, DMG_LIGHT, DMG_POISON, 10 },  // ловок и хитёр; молнию не обойти, яд нипочём
+    { "Troll",           6,1,  75, 14, 7,  5,  38,  20, DMG_FIRE,   DMG_PHYS,   12 },  // регенерирует, огонь жжёт
+    { "Yeti",            7,1,  90, 16, 8,  7,  48,  28, DMG_FIRE,   DMG_LIGHT,  16 },  // ледяной, шерсть изолирует ток
+    { "Cyclops",         8,1, 110, 19,10,  8,  62,  40, DMG_POISON, DMG_PHYS,   22 },  // толстокожий, но травится ядом
+    { "Goblin Marauder", GOBLIN_SPR,2,  92, 21, 9, 20,  70,  40, DMG_LIGHT, DMG_POISON, 30 },  // матёрый налётчик, тот же приём
+    { "Goblin Warlord",  GOBLIN_SPR,2, 150, 30,14, 14, 120,  80, DMG_LIGHT, DMG_PHYS,   50 },  // вожак в броне: режет физ-урон, но молния бьёт
 };
 #define MON_N ((int)(sizeof(DEFS) / sizeof(DEFS[0])))
 
@@ -141,7 +150,8 @@ bool monsterActiveAt(int32_t x, int32_t y, Monster &out)
 
     const Def &D = DEFS[type];
     static char bossName[24];
-    out.spriteId = (uint8_t)type;
+    out.spriteId = D.spr;
+    out.anim     = D.anim;
     if (boss) { snprintf(bossName, sizeof(bossName), "%s!", D.name); out.name = bossName; }
     else      out.name = D.name;
     out.level = level;

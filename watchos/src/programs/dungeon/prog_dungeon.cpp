@@ -22,7 +22,8 @@ static const uint32_t HOLD_DELAY = 0;     // без стартовой пауз�
 static const uint32_t REPEAT_MS  = 60;    // минимальный интервал между шагами (троттл удара в стену;
                                           // реальный шаг длится дольше из-за анимации скролла — паузы не создаёт)
 static const int      ANIM_FRAMES = 4;    // ПРОТОТИП: кадров плавного скролла на шаг
-static const uint32_t IDLE_ANIM_MS = 450; // период смены кадра idle-анимации игрока
+static const uint32_t IDLE_ANIM_MS = 450; // период смены кадра «дыхания» игрока в простое
+static const uint32_t AMBIENT_REDRAW_MS = 110;  // период перерисовки карты в простое (мерцание факелов/монстров)
 
 static int      heldDx = 0, heldDy = 0;
 static uint32_t holdStart = 0, lastRep = 0;
@@ -758,9 +759,11 @@ static void gameTick()
         heldDx = heldDy = 0;                            // отпустили / центр
     }
 
-    // Анимация игрока в простое: пока стоим (палец не на экране) — листаем idle-кадры.
-    // При остановке после бега — сразу один кадр idle-позы, дальше по таймеру.
-    static uint32_t lastIdle = 0;
+    // Фоновая анимация в простое (палец не на экране): факелы и монстры мерцают по millis(),
+    // поэтому перерисовываем карту часто (AMBIENT_REDRAW_MS). Кадр «дыхания» игрока листаем
+    // реже (IDLE_ANIM_MS) — независимо от частоты перерисовки. После сна экран гаснет, так что
+    // этот частый рендер живёт только в окне бодрствования до light sleep.
+    static uint32_t lastRedraw = 0, lastBreath = 0;
     static bool     wasMoving = false;
     if (inEdge) {
         wasMoving = true;                              // держим стрелку → бежим (кадры крутит step)
@@ -769,12 +772,17 @@ static void gameTick()
             wasMoving = false;
             gamePlayerSetMoving(false, 0);
             gameRenderMap(px, py);
-            lastIdle = now;
-        } else if (now - lastIdle >= IDLE_ANIM_MS) {
-            lastIdle = now;
-            gamePlayerSetMoving(false, 0);
-            gamePlayerAnimAdvance();
-            gameRenderMap(px, py);
+            lastRedraw = lastBreath = now;
+        } else {
+            if (now - lastBreath >= IDLE_ANIM_MS) {   // редкое «дыхание» игрока
+                lastBreath = now;
+                gamePlayerSetMoving(false, 0);
+                gamePlayerAnimAdvance();
+            }
+            if (now - lastRedraw >= AMBIENT_REDRAW_MS) {   // частая перерисовка для пламени
+                lastRedraw = now;
+                gameRenderMap(px, py);
+            }
         }
     }
 }
