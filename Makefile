@@ -5,6 +5,7 @@
 #   make flash      — собрать и залить на часы
 #   make fs         — залить ТОЛЬКО файлы из watchos/data/ в SPIFFS (станции и т.п.)
 #   make sprites    — собрать sprites/N.png (16×16, ключ — салатовый) → sprites.png + sprites_gen.h
+#   make vu         — конвертировать data/img/vu-meter.png → src/programs/vu_gen.h (RGB565)
 #   make monitor    — серийный монитор (Serial, 115200)
 #   make ports      — список подключённых плат/портов
 #   make clean      — очистить кэш сборки arduino-cli
@@ -26,13 +27,17 @@ ESPTOOL     := $(firstword $(wildcard $(ESP32TOOLS)/esptool_py/*/esptool))
 SPIFFS_OFF  := 0xc90000
 SPIFFS_SIZE := 3538944          # 0x360000 (раздел spiffs в default_16MB)
 
-.PHONY: all time build flash upload fs monitor ports clean sprites
+.PHONY: all time build flash upload fs monitor ports clean sprites vu
 
 all: flash
 
 # Спрайты: sprites/N.png (16x16, ключ прозрачности — салатовый) -> sprites/sprites.png + sprites_gen.h
 sprites:
 	python3 tools/gen_sprites.py
+
+# Подложка VU-метра: data/img/vu-meter.png (240×130) -> src/programs/vu_gen.h (RGB565)
+vu:
+	python3 tools/gen_vu.py
 
 # Реальное время хоста → build_time.h. Из него RTC ставится при старте,
 # иначе часы показывают неверное время. Генерируется при каждой сборке.

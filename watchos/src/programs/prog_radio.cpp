@@ -6,6 +6,7 @@
 #include "../../sound.h"
 #include "../../stations.h"
 #include "../../webedit.h"
+#include "vu_gen.h"
 #include <string.h>
 #include <math.h>
 
@@ -184,6 +185,169 @@ static void drawSpectrumScreen()
     drawPageDots(3, screen, CONTENT_BOTTOM - 8);
 }
 
+// ─────────────────── VU-метр (стрелочный, поверх ретро-подложки) ───────────────────
+// Подложка VU_BG (240×130 RGB565) лежит во всю ширину, верх — там же, где полосы спектра.
+// Ось стрелки задана в координатах картинки (нижний центр); стрелку рисуем поверх и
+// стираем восстановлением фона из того же VU_BG (одинаковый путь drawPixel — без рассинхрона).
+static const int   VU_X0   = (SCR_W - VU_W) / 2;       // = 0 (240 во всю ширину)
+static const int   VU_Y0   = SPEC_Y0;                  // = 50, как верх полос спектра
+static const float VU_PIVX = 120.0f, VU_PIVY = 111.0f; // ось стрелки в координатах VU_BG
+static const float VU_LEN  = 80.0f;                    // длина стрелки, px
+static const float VU_HALF = 52.0f * (float)M_PI / 180.0f;  // размах ±52° от вертикали
+static const float VU_REF  = 9000.0f;                  // опорный RMS «full-scale» (чувствительность)
+static const uint16_t COL_NEEDLE = 0x0000;             // чёрная стрелка — классика на янтаре
+
+static int   vizMode    = 0;        // подрежим экрана спектра: 0 — спектр, 1 — VU-метр
+static float vuLevel   = 0;        // сглаженный уровень 0..1 (баллистика VU)
+static float vuDrawnAng = 999.0f;  // последний отрисованный угол (999 = стрелки на экране нет)
+
+// Растеризует стрелку под углом ang (рад, от вертикали вверх; + вправо) в массив
+// экранных пикселей xs/ys. Возвращает их число. Толщина ~3px.
+#define VU_MAXPX 320
+static int vuRaster(float ang, int16_t *xs, int16_t *ys)
+{
+    float dx = sinf(ang), dy = -cosf(ang);             // направление от оси «вверх»
+    float px = -dy, py = dx;                           // перпендикуляр (для толщины)
+    int n = 0;
+    for (float t = 5.0f; t <= VU_LEN; t += 1.0f) {     // от 5px (за ступицей) до конца
+        float cx = VU_PIVX + dx * t, cy = VU_PIVY + dy * t;
+        for (int o = -1; o <= 1; o++) {
+            int ix = (int)lroundf(cx + px * o);
+            int iy = (int)lroundf(cy + py * o);
+            if (ix < 0 || ix >= VU_W || iy < 0 || iy >= VU_H) continue;
+            if (n >= VU_MAXPX) return n;
+            xs[n] = VU_X0 + ix; ys[n++] = VU_Y0 + iy;
+        }
+    }
+    return n;
+}
+
+static int16_t vu_ox[VU_MAXPX], vu_oy[VU_MAXPX];       // пиксели стрелки прошлого кадра
+static int     vu_on = 0;
+
+// Дифференциальная перерисовка: новую стрелку рисуем зелёным (общие со старой пиксели
+// остаются гореть непрерывно — не мерцают), затем стираем только пиксели старой, которых
+// нет в новой (восстановление фона из VU_BG). Колор-путь — тот же drawPixel.
+static void vuRenderNeedle(float ang)
+{
+    int16_t nx[VU_MAXPX], ny[VU_MAXPX];
+    int nn = vuRaster(ang, nx, ny);
+    for (int i = 0; i < nn; i++) tft->drawPixel(nx[i], ny[i], COL_NEEDLE);   // новая поверх
+    for (int i = 0; i < vu_on; i++) {                                        // старая \ новая → фон
+        bool keep = false;
+        for (int j = 0; j < nn; j++) if (vu_ox[i] == nx[j] && vu_oy[i] == ny[j]) { keep = true; break; }
+        if (!keep) {
+            int bx = vu_ox[i] - VU_X0, by = vu_oy[i] - VU_Y0;
+            tft->drawPixel(vu_ox[i], vu_oy[i], VU_BG[by * VU_W + bx]);
+        }
+    }
+    for (int i = 0; i < nn; i++) { vu_ox[i] = nx[i]; vu_oy[i] = ny[i]; }
+    vu_on = nn;
+}
+
+// Пересчёт уровня (RMS последних SPEC_N сэмплов) + перерисовка стрелки с баллистикой VU.
+static void vuUpdate(bool active)
+{
+    float target = 0;
+    if (active) {
+        int16_t s[SPEC_N];
+        audioSpectrumCopy(s);
+        float sum = 0;
+        for (int i = 0; i < SPEC_N; i++) sum += (float)s[i] * (float)s[i];
+        float rms = sqrtf(sum / SPEC_N);
+        target = rms / VU_REF;
+        if (target > 1) target = 1;
+        target = sqrtf(target);                        // приподнять тихие уровни
+    }
+    // Баллистика VU, независимая от fps: коэффициент пересчитывается под реальный dt
+    // (опорные 0.35 подъём / 0.12 спад заданы для кадра ~40 мс — feel не зависит от частоты).
+    static uint32_t vu_t = 0;
+    uint32_t now = millis();
+    float dt = vu_t ? (float)(now - vu_t) : 40.0f;
+    if (dt > 200.0f) dt = 200.0f;                      // защита от больших пауз (вход на экран)
+    vu_t = now;
+    float k0 = (target > vuLevel) ? 0.35f : 0.12f;
+    float k = 1.0f - powf(1.0f - k0, dt / 40.0f);
+    vuLevel += (target - vuLevel) * k;
+
+    float ang = -VU_HALF + vuLevel * (2.0f * VU_HALF); // -VU_HALF (тишина) .. +VU_HALF (пик)
+    if (vuDrawnAng < 100.0f && fabsf(ang - vuDrawnAng) < 0.004f) return;   // < ~0.2° — не дёргать
+    vuRenderNeedle(ang);
+    vuDrawnAng = ang;
+}
+
+static void drawVuScreen()
+{
+    tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
+    statusbarDraw();
+    drawTitle();
+    // Подложка одним блочным pushImage (быстро). swapBytes=true → байты на шине те же,
+    // что у drawPixel — фон совпадает по цвету со стиранием стрелки (drawPixel из VU_BG).
+    bool sw = tft->getSwapBytes();
+    tft->setSwapBytes(true);
+    tft->pushImage(VU_X0, VU_Y0, VU_W, VU_H, VU_BG);
+    tft->setSwapBytes(sw);
+    tft->fillCircle(VU_X0 + (int)VU_PIVX, VU_Y0 + (int)VU_PIVY, 4, COL_NEEDLE);  // ступица
+    vuDrawnAng = 999.0f; vu_on = 0;                    // фон свежий — стрелки ещё нет
+    vuUpdate(audioIsPlaying() && !paused);
+    drawPageDots(3, screen, CONTENT_BOTTOM - 8);
+}
+
+// ─────────────────── Осциллограф (форма волны, временная область) ───────────────────
+// Рисуем 64 сэмпла моно как зелёный луч. Перерисовка дельтой: стираем прошлый луч по его же
+// точкам (фон + базовая линия), затем рисуем новый — без полной очистки, без мигания.
+static const int   SCOPE_Y0  = SPEC_Y0;                 // 50
+static const int   SCOPE_H   = 130;                     // поле осциллографа
+static const int   SCOPE_MID = SCOPE_Y0 + SCOPE_H / 2;  // ось (115)
+static const int   SCOPE_AMP = SCOPE_H / 2 - 6;         // макс. отклонение в px
+static float       sc_ref    = 4000.0f;                 // авто-усиление (плавающий пик)
+static int         sc_x[SPEC_N];                        // x-координаты сэмплов (фикс.)
+static int         sc_y[SPEC_N];                        // прошлые y (для стирания)
+static bool        sc_have   = false;                   // на экране уже есть луч
+
+static void scopeBaseline() { tft->drawFastHLine(0, SCOPE_MID, SCR_W, COL_GREEN_DIM); }
+
+static void scopeUpdate(bool active)
+{
+    int16_t s[SPEC_N];
+    if (active) audioSpectrumCopy(s);
+    else        for (int i = 0; i < SPEC_N; i++) s[i] = 0;
+
+    float peak = 1.0f;
+    for (int i = 0; i < SPEC_N; i++) { float a = fabsf((float)s[i]); if (a > peak) peak = a; }
+    if (peak > sc_ref) sc_ref += (peak - sc_ref) * 0.30f;   // быстрый подъём
+    else               sc_ref += (peak - sc_ref) * 0.05f;   // плавный спад
+    if (sc_ref < 1500.0f) sc_ref = 1500.0f;                 // пол — тишина не раздувается
+
+    int ny[SPEC_N];
+    for (int i = 0; i < SPEC_N; i++) {
+        int d = (int)((float)s[i] / sc_ref * SCOPE_AMP);
+        if (d >  SCOPE_AMP) d =  SCOPE_AMP;
+        if (d < -SCOPE_AMP) d = -SCOPE_AMP;
+        ny[i] = SCOPE_MID - d;
+    }
+    if (sc_have)                                            // стереть прошлый луч
+        for (int i = 1; i < SPEC_N; i++)
+            tft->drawLine(sc_x[i - 1], sc_y[i - 1], sc_x[i], sc_y[i], COL_BG);
+    scopeBaseline();                                        // восстановить ось (стирание могло задеть)
+    for (int i = 1; i < SPEC_N; i++)                        // нарисовать новый
+        tft->drawLine(sc_x[i - 1], ny[i - 1], sc_x[i], ny[i], COL_GREEN);
+    for (int i = 0; i < SPEC_N; i++) sc_y[i] = ny[i];
+    sc_have = true;
+}
+
+static void drawScopeScreen()
+{
+    tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
+    statusbarDraw();
+    drawTitle();
+    for (int i = 0; i < SPEC_N; i++) sc_x[i] = i * (SCR_W - 1) / (SPEC_N - 1);
+    sc_have = false;                                        // фон свежий — прошлого луча нет
+    scopeBaseline();
+    scopeUpdate(audioIsPlaying() && !paused);
+    drawPageDots(3, screen, CONTENT_BOTTOM - 8);
+}
+
 static const int MQ_SIZE = 2;                       // масштаб шрифта бегущей строки (font1)
 static const int MQ_WIN  = 19;                      // символов в окне (240 / (6*2))
 static const int MQ_GAP  = 4;                       // пробелы между повторами
@@ -314,7 +478,7 @@ static void drawServerScreen()
 static void drawScreen()
 {
     if      (screen == 0) drawPlayer();
-    else if (screen == 1) drawSpectrumScreen();
+    else if (screen == 1) { if (vizMode == 0) drawSpectrumScreen(); else if (vizMode == 1) drawVuScreen(); else drawScopeScreen(); }
     else                  drawServerScreen();
 }
 
@@ -333,8 +497,9 @@ static void playStation(int i)
     mqShown[0] = 0;
     mqOffset = 0;
     audioStart(stationsUrl(cur));
-    if (screen == 0) { drawTitle(); drawTransport(); }
-    else             { drawTitle(); drawSpecLabels(); }   // частота дискретизации могла смениться
+    if (screen == 0)           { drawTitle(); drawTransport(); }
+    else if (vizMode == 0)      { drawTitle(); drawSpecLabels(); }   // частота дискретизации могла смениться
+    else                       { drawTitle(); }                     // VU: подписи частот не нужны
 }
 
 static void togglePlay()
@@ -422,10 +587,12 @@ static void radioTick()
             drawMarquee();
         }
     } else if (screen == 1) {
-        // Спектроанализатор ~30 fps (только на странице спектра).
-        if (millis() - sp_last > 33) {
+        // Спектр / VU / осциллограф ~60 fps (только на этой странице).
+        if (millis() - sp_last > 16) {
             sp_last = millis();
-            drawSpectrum(audioIsPlaying() && !paused);
+            if      (vizMode == 0) drawSpectrum(audioIsPlaying() && !paused);
+            else if (vizMode == 1) vuUpdate(audioIsPlaying() && !paused);
+            else                   scopeUpdate(audioIsPlaying() && !paused);
         }
     }
     // screen == 2 (сервер) — статичный экран, поллинг сервера выше.
@@ -450,6 +617,9 @@ static void radioEvent(InputEvent e, int16_t x, int16_t y)
                 if (x < 44)            volStep(-1);
                 else if (x > SCR_W-44) volStep(+1);
             }
+        } else if (screen == 1) {                                          // тап — спектр → VU → осциллограф
+            vizMode = (vizMode + 1) % 3;
+            drawScreen();
         } else if (screen == 2) {                                          // тап по кнопке сервера
             if (x >= SRV_BX && x <= SRV_BX + SRV_BW && y >= SRV_BY && y <= SRV_BY + SRV_BH)
                 toggleServer();
