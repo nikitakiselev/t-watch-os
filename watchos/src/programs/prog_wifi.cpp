@@ -5,6 +5,8 @@
 #include "../../wifi.h"
 #include "../../keyboard.h"
 #include "../../listnav.h"
+#include "../../modal.h"
+#include "../../speedtest.h"
 
 static const int TITLE_Y  = STATUSBAR_H + 12;
 static const int STATUS_Y = STATUSBAR_H + 30;
@@ -110,13 +112,60 @@ static void connectTo(const char *ssid, const char *pass)
     drawList();
 }
 
+// Диалог по тапу на подключённую сеть: SpeedTest / Disconnect / Back.
+static const int CD_W = 180, CD_H = 132, CD_X0 = (SCR_W - 180) / 2, CD_Y0 = 40;
+static const int CD_BH = 28, CD_GAP = 6, CD_BY0 = 40 + 34;   // = CD_Y0 + 34
+
+static void drawConnDialog(const char *ssid, int sel)
+{
+    modalPanel(CD_X0, CD_Y0, CD_W, CD_H, 10, COL_GREEN);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString(ssid, SCR_W / 2, CD_Y0 + 16, 2);
+
+    const char *items[3] = { "SpeedTest", "Disconnect", "Back" };
+    const int bx = CD_X0 + 12, bw = CD_W - 24;
+    for (int i = 0; i < 3; i++) {
+        int by = CD_BY0 + i * (CD_BH + CD_GAP);
+        if (i == sel) tft->fillRoundRect(bx, by, bw, CD_BH, 6, COL_GREEN_DIM);
+        tft->drawRoundRect(bx, by, bw, CD_BH, 6, i == sel ? COL_AMBER : COL_FRAME);
+        tft->setTextColor(COL_GREEN, i == sel ? COL_GREEN_DIM : COL_BG);
+        tft->drawString(items[i], SCR_W / 2, by + CD_BH / 2, 2);
+    }
+}
+
+static void connectedDialog(const char *ssid)
+{
+    ListNav l{3, 0, 0, 0};        // свайп ↑↓ — выбор, тап — подтвердить
+    modalBegin();
+    drawConnDialog(ssid, l.sel);
+    for (;;) {
+        int16_t x, y; InputEvent e = modalPoll(x, y);
+        if (e == EVT_BACK) { kernelRedraw(); return; }
+        if (e == EVT_UP || e == EVT_DOWN) {
+            if (listNavEvent(l, e)) drawConnDialog(ssid, l.sel);
+            continue;
+        }
+        if (e == EVT_TAP) {
+            if (x < CD_X0 || x > CD_X0 + CD_W || y < CD_Y0 || y > CD_Y0 + CD_H) {
+                kernelRedraw(); return;                  // тап мимо панели — закрыть
+            }
+            int row = (y - CD_BY0) / (CD_BH + CD_GAP);
+            if (row < 0 || row > 2) continue;
+            if (row == 0) { speedtestRun(); kernelRedraw(); return; }   // SpeedTest
+            if (row == 1) { wifiDisconnect(); kernelRedraw(); return; } // Disconnect
+            kernelRedraw(); return;                                     // Back
+        }
+    }
+}
+
 static void actSelected()
 {
     if (netCount == 0) return;
     WifiNet &n = nets[selected];
 
     bool conn = wifiConnected() && strncmp(n.ssid, wifiCurrentSsid(), WIFI_SSID_LEN) == 0;
-    if (conn) { wifiDisconnect(); statusbarDraw(); drawStatusLine(); drawList(); return; }
+    if (conn) { connectedDialog(n.ssid); return; }
 
     if (!n.secured) { connectTo(n.ssid, ""); return; }
 
