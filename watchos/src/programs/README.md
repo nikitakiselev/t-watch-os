@@ -105,6 +105,59 @@ static bool myKeepAwake() { return running; }   // напр. пока секун
 static const Program *const appList[] = { ..., &myAppProgram };
 ```
 
+## 7. Модальные окна и меню (`modal.h`)
+
+Когда приложению нужно **всплывающее окно или меню** (подтверждение, выбор из списка,
+инфо-карточка) — это собственный блокирующий цикл *поверх* обычного экрана, а не отдельная
+`Program`. Чтобы не дублировать каждый раз «ждём отпускания пальца», цикл опроса и рисование
+рамки, есть три примитива в `../../modal.h` (переиспользуй их в любой программе):
+
+```c
+void       modalBegin();                                   // открыть диалог (см. ниже)
+InputEvent modalPoll(int16_t &x, int16_t &y);              // один опрос внутри цикла
+void       modalPanel(int x, int y, int w, int h, int r, uint16_t border); // панель окна
+```
+
+- **`modalBegin()`** — вызвать **один раз** перед циклом. Дожидается, пока отпустят палец, которым
+  открыли окно (иначе его release «нажмёт» элемент под окном), затем `inputBegin()`.
+- **`modalPoll(x, y)`** — вызывать в `for(;;)` вместо `inputPoll`. Сам делает `powerNoteActivity()`
+  (модальный цикл держит таймер сна) и троттлит CPU в простое (~20 мс) — **свой `delay()` в конце
+  цикла не нужен**.
+- **`modalPanel(...)`** — **сам затеняет фон** под окном (вуаль `modalScrim`, чтобы то, что было
+  на экране, ушло на второй план), затем рисует заливку + рамку цветом `border` (скругление `r`).
+  Текст/контент рисуешь поверх — он ложится на чистую панель. Альфа-блендинга на дисплее нет, так
+  что затенение — это дешёвый дизеринг чёрными линиями через строку (read-back пикселей не
+  поддерживается). Для полноэкранного меню без панели есть отдельный `modalScrim()`.
+
+```c
+// Диалог Yes/No: вернуть true, если подтвердили.
+static bool confirmDialog(const char *title)
+{
+    const int w = 200, h = 110, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
+    modalPanel(x0, y0, w, h, 12, COL_AMBER);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_GREEN, COL_BG);
+    tft->drawString(title, SCR_W / 2, y0 + 30, 2);
+    // ...нарисовать кнопки OK / Cancel...
+
+    modalBegin();
+    for (;;) {
+        int16_t x, y;
+        InputEvent e = modalPoll(x, y);
+        if (e == EVT_BACK) return false;                   // долгая кнопка — отмена
+        if (e == EVT_TAP) {
+            if (/* попал в OK */ false) return true;
+            return false;                                  // Cancel / тап мимо окна
+        }
+    }
+}
+```
+
+Список с прокруткой строится так же: храни `sel`/`top`, на `EVT_UP/DOWN` крути через
+`ListNav`/`listNavEvent` (`../../listnav.h`), на `EVT_TAP` — выбор. Примеры в игре: `combat.cpp`
+(`skillMenu`, меню зелий, инфо-карточки), `prog_game.cpp` (`itemDetailDialog`, торговец,
+инвентарь).
+
 ---
 
 ## Готовый шаблон

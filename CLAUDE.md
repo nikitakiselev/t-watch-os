@@ -63,7 +63,10 @@ make clean      # очистить кэш arduino-cli + удалить build_tim
 - `watchos.ino` — `setup()`/`loop()`: `inputPoll` → (навбар/back/`onEvent`) → `onTick` текущей
   программы → `powerTick`.
 - Фреймворк (в корне `watchos/`): `hw` (обёртка над TTGOClass, RTC, батарея, часовые пояса),
-  `input` (нормализация тача+кнопки в события), `navbar`, `statusbar`, `theme`, `power`, `apps`.
+  `input` (нормализация тача+кнопки в события), `navbar`, `statusbar`, `theme`, `power`, `apps`,
+  `modal` (общий каркас всплывающих окон/меню: `modalBegin`/`modalPoll`/`modalPanel` — см.
+  «Модальные окна» в `src/programs/README.md`; переиспользовать во всех программах, не дублировать
+  цикл опроса/рамку).
 - Приложения — в `watchos/src/programs/` (`prog_*.cpp/.h`).
 
 ### Добавление приложения
