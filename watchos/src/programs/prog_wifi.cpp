@@ -150,8 +150,9 @@ static void connectedDialog(const char *ssid)
             if (x < CD_X0 || x > CD_X0 + CD_W || y < CD_Y0 || y > CD_Y0 + CD_H) {
                 kernelRedraw(); return;                  // тап мимо панели — закрыть
             }
+            if (y < CD_BY0) continue;                    // тап по заголовку — игнор
             int row = (y - CD_BY0) / (CD_BH + CD_GAP);
-            if (row < 0 || row > 2) continue;
+            if (row > 2) continue;                       // тап ниже последней кнопки
             if (row == 0) { speedtestRun(); kernelRedraw(); return; }   // SpeedTest
             if (row == 1) { wifiDisconnect(); kernelRedraw(); return; } // Disconnect
             kernelRedraw(); return;                                     // Back
