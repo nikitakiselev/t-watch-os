@@ -113,18 +113,21 @@ static void connectTo(const char *ssid, const char *pass)
 }
 
 // Диалог по тапу на подключённую сеть: SpeedTest / Disconnect / Back.
-static const int CD_W = 180, CD_H = 132, CD_X0 = (SCR_W - 180) / 2, CD_Y0 = 40;
-static const int CD_BH = 28, CD_GAP = 6, CD_BY0 = 40 + 34;   // = CD_Y0 + 34
+// Окно крупное, по центру контента (24..204): запас сверху над заголовком и снизу
+// под последней кнопкой, кнопки с воздухом между собой.
+static const int CD_W = 190, CD_H = 168;
+static const int CD_X0 = (SCR_W - CD_W) / 2, CD_Y0 = 30;
+static const int CD_BH = 30, CD_GAP = 12, CD_BY0 = CD_Y0 + 44;
 
 static void drawConnDialog(const char *ssid, int sel)
 {
     modalPanel(CD_X0, CD_Y0, CD_W, CD_H, 10, COL_GREEN);
     tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString(ssid, SCR_W / 2, CD_Y0 + 16, 2);
+    tft->drawString(ssid, SCR_W / 2, CD_Y0 + 22, 2);
 
     const char *items[3] = { "SpeedTest", "Disconnect", "Back" };
-    const int bx = CD_X0 + 12, bw = CD_W - 24;
+    const int bx = CD_X0 + 14, bw = CD_W - 28;
     for (int i = 0; i < 3; i++) {
         int by = CD_BY0 + i * (CD_BH + CD_GAP);
         if (i == sel) tft->fillRoundRect(bx, by, bw, CD_BH, 6, COL_GREEN_DIM);
@@ -136,7 +139,9 @@ static void drawConnDialog(const char *ssid, int sel)
 
 static void connectedDialog(const char *ssid)
 {
-    ListNav l{3, 0, 0, 0};        // свайп ↑↓ — выбор, тап — подтвердить
+    // Системное правило: свайп ↑↓ выбирает пункт, тап/клик активирует ВЫДЕЛЕННЫЙ
+    // (не тот, что под пальцем). Тап мимо панели — закрыть.
+    ListNav l{3, 0, 0, 0};
     modalBegin();
     drawConnDialog(ssid, l.sel);
     for (;;) {
@@ -148,15 +153,16 @@ static void connectedDialog(const char *ssid)
         }
         if (e == EVT_TAP) {
             if (x < CD_X0 || x > CD_X0 + CD_W || y < CD_Y0 || y > CD_Y0 + CD_H) {
-                kernelRedraw(); return;                  // тап мимо панели — закрыть
+                kernelRedraw(); return;            // тап мимо панели — закрыть
             }
-            if (y < CD_BY0) continue;                    // тап по заголовку — игнор
-            int row = (y - CD_BY0) / (CD_BH + CD_GAP);
-            if (row > 2) continue;                       // тап ниже последней кнопки
-            if (row == 0) { speedtestRun(); kernelRedraw(); return; }   // SpeedTest
-            if (row == 1) { wifiDisconnect(); kernelRedraw(); return; } // Disconnect
-            kernelRedraw(); return;                                     // Back
+            // тап внутри панели — падаем к активации выделенного (ниже)
+        } else if (e != EVT_CLICK) {
+            continue;                              // прочие события игнорим
         }
+        // EVT_TAP внутри панели или EVT_CLICK — активировать ВЫДЕЛЕННЫЙ пункт
+        if (l.sel == 0) { speedtestRun(); kernelRedraw(); return; }   // SpeedTest
+        if (l.sel == 1) { wifiDisconnect(); kernelRedraw(); return; } // Disconnect
+        kernelRedraw(); return;                                       // Back
     }
 }
 
