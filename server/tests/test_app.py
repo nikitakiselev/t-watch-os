@@ -181,3 +181,19 @@ def test_speedtest_down_requires_api_key_when_set(tmp_path, monkeypatch):
         assert r.status_code == 401
     with c.stream("GET", "/speedtest/down?mb=1", headers={"X-API-Key": "secret123"}) as r:
         assert r.status_code == 200
+
+
+def test_speedtest_up_counts_bytes(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    body = b"x" * 50000
+    r = c.post("/speedtest/up", content=body)
+    assert r.status_code == 200
+    assert r.json() == {"received": len(body)}
+
+
+def test_speedtest_up_requires_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    c = make_client(tmp_path, monkeypatch)
+    assert c.post("/speedtest/up", content=b"abc").status_code == 401
+    assert c.post("/speedtest/up", content=b"abc",
+                  headers={"X-API-Key": "secret123"}).status_code == 200

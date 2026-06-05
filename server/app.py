@@ -99,6 +99,17 @@ async def speedtest_down(request: Request, mb: int = 128):
     return StreamingResponse(gen(), media_type="application/octet-stream")
 
 
+@app.post("/speedtest/up")
+async def speedtest_up(request: Request):
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    total = 0
+    async for chunk in request.stream():     # прозрачно разбирает chunked
+        total += len(chunk)
+    return JSONResponse({"received": total})
+
+
 @app.get("/audio/{session_id}/{name}")
 def audio(session_id: str, name: str):
     settings = get_settings()
