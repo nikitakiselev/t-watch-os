@@ -20,7 +20,7 @@ String aiServerUrl()
 }
 
 // API-ключ — 2-я строка /ai_server.txt (1-я — URL). Пусто, если не задан.
-static String aiApiKey()
+String aiApiKey()
 {
     String key;
     File f = SPIFFS.open("/ai_server.txt", "r");

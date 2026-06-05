@@ -11,5 +11,9 @@ struct AiResult {
 // Базовый URL сервера из SPIFFS /ai_server.txt (1-я строка), иначе дефолт.
 String   aiServerUrl();
 
+// API-ключ из 2-й строки /ai_server.txt ("" если не задан). Публичный — его
+// переиспользует speedtest для заголовка X-API-Key.
+String   aiApiKey();
+
 // POST сырого LPCM 16 кГц/16 бит/моно на <server>/talk?session=<uuid>.
 AiResult aiSend(const char *uuid, const int16_t *pcm, int samples);

@@ -13,6 +13,14 @@
 #define CONTENT_TOP      STATUSBAR_H
 #define CONTENT_BOTTOM   (SCR_H - NAVBAR_H)    // = 204; ниже рисовать нельзя
 
+// ── SpeedTest (в приложении Wi-Fi) ──
+// Хост тот же, что у AI-сервера, но задаётся явно: speedtest читает его без SPIFFS.
+// API-ключ берётся из /ai_server.txt (через aiApiKey()), в прошивку не зашит.
+#define SPEEDTEST_HOST   "twatch.nikitakiselev.ru"
+#define SPEEDTEST_PORT   80
+#define SPEEDTEST_SECS   8        // длительность каждой фазы (download/upload), c
+#define SPEEDTEST_PINGS  5        // число проб ping, в результат идёт минимум
+
 // ───────────────────────────── Часовые пояса ──────────────────────────
 // Время RTC трактуем как базовый пояс (MSK). Остальные — смещения от него.
 //   MSK = UTC+3  →  база
