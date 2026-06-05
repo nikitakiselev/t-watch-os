@@ -100,8 +100,8 @@ git commit -m "feat(server): эндпоинт /speedtest/ping"
 ```python
 def test_speedtest_down_streams(tmp_path, monkeypatch):
     c = make_client(tmp_path, monkeypatch)
-    # бесконечный стрим — читаем только первый чанк и закрываем соединение
-    with c.stream("GET", "/speedtest/down") as r:
+    # ?mb=1 — поток ограничен 1 MiB, читаем только первый чанк и закрываем соединение
+    with c.stream("GET", "/speedtest/down?mb=1") as r:
         assert r.status_code == 200
         got = next(r.iter_bytes())
         assert len(got) > 0
@@ -110,9 +110,9 @@ def test_speedtest_down_streams(tmp_path, monkeypatch):
 def test_speedtest_down_requires_api_key_when_set(tmp_path, monkeypatch):
     monkeypatch.setenv("API_KEY", "secret123")
     c = make_client(tmp_path, monkeypatch)
-    with c.stream("GET", "/speedtest/down") as r:
+    with c.stream("GET", "/speedtest/down?mb=1") as r:
         assert r.status_code == 401
-    with c.stream("GET", "/speedtest/down", headers={"X-API-Key": "secret123"}) as r:
+    with c.stream("GET", "/speedtest/down?mb=1", headers={"X-API-Key": "secret123"}) as r:
         assert r.status_code == 200
 ```
 
@@ -133,17 +133,24 @@ from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Streamin
 
 ```python
 @app.get("/speedtest/down")
-def speedtest_down(request: Request):
+async def speedtest_down(request: Request, mb: int = 128):
     settings = get_settings()
     if not _api_key_ok(request, settings):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+    # Поток ЖЁСТКО ограничен сверху (никогда не бесконечный — иначе клиент, который
+    # не закрылся, заставил бы сервер генерировать вечно, а TestClient вычитал бы тело
+    # целиком → OOM). Дефолт 128 MiB перекрывает 8 c фазы download с запасом; реальный
+    # клиент закрывает сокет раньше — is_disconnected/GeneratorExit останавливают цикл.
     CHUNK = b"\0" * 16384
+    max_chunks = max(1, mb) * 64        # 64 чанка по 16 KiB = 1 MiB
 
-    def gen():
+    async def gen():
         try:
-            while True:
-                yield CHUNK            # рвётся, когда клиент закроет сокет
+            for _ in range(max_chunks):
+                if await request.is_disconnected():
+                    return
+                yield CHUNK
         except (BrokenPipeError, ConnectionResetError, GeneratorExit):
             return
 

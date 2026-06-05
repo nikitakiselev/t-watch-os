@@ -53,24 +53,32 @@ ESP32 на Arduino-ядре 2.0.17 по Wi-Fi реально выдаёт ~0.5�
 Все три эндпоинта защищены тем же `_api_key_ok(request, settings)`, что и `/talk`
 (при пустом ключе в настройках проверка выключена — локальная разработка).
 
-### `GET /speedtest/down`
+### `GET /speedtest/down?mb=<N>`
 
-Бесконечно стримит нули, пока клиент не закроет сокет.
+Стримит нули, ЖЁСТКО ограничено сверху (`mb`, дефолт 128 MiB) — никогда не
+бесконечно. Бесконечный поток нельзя: клиент, который не закрылся, заставил бы
+сервер генерировать вечно, а `TestClient` в pytest вычитал бы тело целиком в
+память → OOM. Дефолт 128 MiB с запасом перекрывает 8 c фазы download на любой
+реальной скорости ESP32; реальный клиент закрывает сокет раньше
+(`is_disconnected`/`GeneratorExit` останавливают цикл). Тесты передают `?mb=1`.
 
 ```python
 from fastapi.responses import StreamingResponse
 
 @app.get("/speedtest/down")
-def speedtest_down(request: Request):
+async def speedtest_down(request: Request, mb: int = 128):
     settings = get_settings()
     if not _api_key_ok(request, settings):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     CHUNK = b"\0" * 16384
-    def gen():
+    max_chunks = max(1, mb) * 64        # 64 чанка по 16 KiB = 1 MiB
+    async def gen():
         try:
-            while True:
-                yield CHUNK            # рвётся, когда клиент отключится
+            for _ in range(max_chunks):
+                if await request.is_disconnected():
+                    return
+                yield CHUNK
         except (BrokenPipeError, ConnectionResetError, GeneratorExit):
             return
     return StreamingResponse(gen(), media_type="application/octet-stream")
