@@ -27,21 +27,23 @@ static const uint32_t SPEAK_CONNECT_TIMEOUT_MS = 10000;   // не заиграл
 
 // Кнопка-микрофон в центре экрана.
 static const int BTN_CX = SCR_W / 2, BTN_CY = 116, BTN_R = 66;
-static const int INFO_Y = CONTENT_BOTTOM - 14;     // строка под кнопкой (громкость / секунды)
+static const int TIMER_Y = BTN_CY - BTN_R - 12;    // таймер секунд — НАД кнопкой (снизу палец)
 
 // Громкость воспроизведения ответа (0..21, как у радио). Меняется кнопками Vol-/Vol+.
 static int aiVolume = 16;
 
+// Вертикальная полоса громкости справа (снизу места нет).
 static void drawVolume()
 {
-    const int bw = 130, bx = (SCR_W - bw) / 2, bh = 8;
-    tft->fillRect(0, INFO_Y - 8, SCR_W, 18, COL_BG);
-    tft->setTextDatum(MR_DATUM);
+    const int bw = 8, bx = SCR_W - 16;
+    const int by = CONTENT_TOP + 22, bh = CONTENT_BOTTOM - CONTENT_TOP - 44;
+    tft->fillRect(bx - 4, by - 14, bw + 14, bh + 20, COL_BG);     // очистить полосу
+    tft->setTextDatum(MC_DATUM);
     tft->setTextColor(COL_GREEN_DIM, COL_BG);
-    tft->drawString("VOL", bx - 6, INFO_Y, 1);
-    tft->drawRect(bx, INFO_Y - bh / 2, bw, bh, COL_FRAME);
-    int fill = (bw - 2) * aiVolume / 21;
-    if (fill > 0) tft->fillRect(bx + 1, INFO_Y - bh / 2 + 1, fill, bh - 2, COL_GREEN);
+    tft->drawString("V", bx + bw / 2, by - 8, 1);                 // подпись сверху
+    tft->drawRect(bx, by, bw, bh, COL_FRAME);
+    int fill = (bh - 2) * aiVolume / 21;
+    if (fill > 0) tft->fillRect(bx + 1, by + bh - 1 - fill, bw - 2, fill, COL_GREEN);  // снизу вверх
 }
 
 static void volStep(int d)
@@ -100,9 +102,11 @@ static void drawScreen()
 {
     tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
     statusbarDraw();
-    tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("AI ASSISTANT", SCR_W / 2, STATUSBAR_H + 12, 2);
+    if (state != ST_RECORDING) {            // в записи эту строку занимает таймер секунд
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString("AI ASSISTANT", SCR_W / 2, STATUSBAR_H + 12, 2);
+    }
     switch (state) {
     case ST_IDLE:      drawButton(COL_GREEN);                  break;
     case ST_RECORDING: drawButton(COL_AMBER);                  break;
@@ -239,17 +243,17 @@ static void assistantTick()
             int got = micCaptureRead(recBuf + recSamples, REC_CAP - recSamples);
             recSamples += got;
         }
-        // секунды записи под кнопкой (точечно, без мерцания)
+        // секунды записи — НАД кнопкой (снизу не видно за пальцем); точечно, без мерцания
         static int lastSec = -1;
         int sec = recSamples / SR;
         if (sec != lastSec) {
             lastSec = sec;
             char b[8];
             snprintf(b, sizeof(b), "%ds", sec);
-            tft->fillRect(0, INFO_Y - 9, SCR_W, 20, COL_BG);   // та же строка, что и бар громкости
+            tft->fillRect(BTN_CX - 40, TIMER_Y - 14, 80, 28, COL_BG);
             tft->setTextDatum(MC_DATUM);
             tft->setTextColor(COL_AMBER, COL_BG);
-            tft->drawString(b, BTN_CX, INFO_Y, 2);
+            tft->drawString(b, BTN_CX, TIMER_Y, 4);
         }
         if (!touchDown() || recSamples >= REC_CAP) {
             stopRecording();
