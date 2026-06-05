@@ -78,7 +78,8 @@ static void blitSpriteX2(const uint16_t *d, int x, int y)
     for (int yy = 0; yy < SPR_PX; yy++)
         for (int xx = 0; xx < SPR_PX; xx++) {
             uint16_t c = d[yy * SPR_PX + xx];
-            if (c != 0xF81F) tft->fillRect(x + xx * 2, y + yy * 2, 2, 2, c);
+            // 0xF81F — прозрачность, 0xF81E — маркер тени (на чёрном фоне боя невидим) → оба пропускаем.
+            if (c != 0xF81F && c != 0xF81E) tft->fillRect(x + xx * 2, y + yy * 2, 2, 2, c);
         }
 }
 
