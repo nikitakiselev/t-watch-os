@@ -164,11 +164,20 @@ static void assistantIcon(TFT_eSPI &g, int cx, int cy, int r)
     g.drawFastVLine(cx, cy + r / 4, r / 4, COL_GREEN);
 }
 
-// Идёт ли сейчас палец по экрану (для hold-to-talk опрашиваем тач напрямую).
+// Палец где-либо на экране (для «ещё держит» во время записи — смещение не обрывает).
 static bool touchDown()
 {
     int16_t x, y;
     return watch->getTouch(x, y);
+}
+
+// Касание ВНУТРИ круглой кнопки (для старта записи — тапы по заголовку/бару/навбару игнорим).
+static bool touchInButton()
+{
+    int16_t x, y;
+    if (!watch->getTouch(x, y)) return false;
+    int dx = x - BTN_CX, dy = y - BTN_CY;
+    return dx * dx + dy * dy <= BTN_R * BTN_R;
 }
 
 static void startRecording()
@@ -221,7 +230,7 @@ static void stopRecording()
 
 static void assistantTick()
 {
-    if (state == ST_IDLE && touchDown()) {
+    if (state == ST_IDLE && touchInButton()) {   // старт — только по кругу кнопки
         startRecording();
         return;
     }
