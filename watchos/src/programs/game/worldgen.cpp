@@ -37,7 +37,8 @@ static uint8_t campTile(int lx, int ly)
     }
     if (lx == 3 && ly == 3) return TILE_CAMP;       // костёр: сохранение + полный отдых
     if (lx == 8 && ly == 3) return TILE_MERCHANT;   // торговец
-    if (lx == 3 && ly == 8) return TILE_ALTAR;      // алтарь
+    // алтаря в лагере нет: гарантированный безопасный алтарь у лестницы позволял
+    // фармить статы циклом по этажам (floorReset сбрасывал отметку). Алтари — только в подземелье.
     if (lx == C - 2 && ly == 1) return TILE_STAIRS; // лестница (правый верхний угол): смена этажа
     return TILE_FLOOR;
 }
