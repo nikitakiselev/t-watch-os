@@ -136,6 +136,8 @@ static void drawMarker(int x, int y, uint8_t t)
     }
 }
 
+static TFT_eSprite *cellSpr = nullptr;   // 32×32 — точечная перерисовка одной клетки (анимация в простое)
+
 void gameRenderInit()
 {
     if (spr) return;
@@ -143,11 +145,16 @@ void gameRenderInit()
     spr->setColorDepth(16);
     spr->createSprite(VW * TILE, VH * TILE);
     spr->setSwapBytes(false);    // ТЕСТ порядка байт: tiles рисуются drawPixel'ом сырым 565
+    cellSpr = new TFT_eSprite(tft);
+    cellSpr->setColorDepth(16);
+    cellSpr->createSprite(TILE, TILE);
+    cellSpr->setSwapBytes(false);
 }
 
 void gameRenderFree()
 {
-    if (spr) { spr->deleteSprite(); delete spr; spr = nullptr; }
+    if (spr)     { spr->deleteSprite();     delete spr;     spr = nullptr; }
+    if (cellSpr) { cellSpr->deleteSprite(); delete cellSpr; cellSpr = nullptr; }
 }
 
 // ── Полупрозрачные стрелки управления ──
@@ -227,4 +234,74 @@ void gameRenderMap(int32_t px, int32_t py, int ox, int oy)
     drawArrow(VW*TILE - ARROW_OFF, VH*TILE/2,           3);
 
     spr->pushSprite(MAP_X, MAP_Y);
+}
+
+// Дорисовать стрелку управления в текущий spr, если её центр попадает в клетку (vx,vy).
+// Координаты стрелок — в координатах большого вьюпорта; переводим в локальные для клетки.
+static void drawArrowInCell(int vx, int vy)
+{
+    const struct { int ax, ay, dir; } A[4] = {
+        { VW*TILE/2,           ARROW_OFF,           0 },
+        { VW*TILE/2,           VH*TILE - ARROW_OFF, 1 },
+        { ARROW_OFF,           VH*TILE/2,           2 },
+        { VW*TILE - ARROW_OFF, VH*TILE/2,           3 },
+    };
+    int x0 = vx * TILE, y0 = vy * TILE;
+    for (int i = 0; i < 4; i++)
+        if (A[i].ax >= x0 && A[i].ax < x0 + TILE && A[i].ay >= y0 && A[i].ay < y0 + TILE)
+            drawArrow(A[i].ax - x0, A[i].ay - y0, A[i].dir);
+}
+
+// Точечная перерисовка ТОЛЬКО анимированных клеток (факелы / анимированные монстры / игрок),
+// для фоновой анимации в простое — вместо полного рендера всей карты. Статичный фон остаётся
+// от последнего полного gameRenderMap; здесь поверх него обновляются лишь живые клетки.
+// Каждая клетка собирается во временный спрайт 32×32 (переиспользуя blit-логику подменой spr)
+// и пушится на экран по своим координатам. Сдвига нет (вызывается в простое, ox=oy=0).
+void gameRenderAnimated(int32_t px, int32_t py)
+{
+    if (!spr || !cellSpr) return;
+    Monster m;
+    for (int vy = 0; vy < VH; vy++)
+        for (int vx = 0; vx < VW; vx++) {
+            int32_t wx = px + vx - VW/2, wy = py + vy - VH/2;
+            uint8_t t = tileAt(wx, wy);
+            bool isPlayer = (vx == VW/2 && vy == VH/2);
+
+            uint8_t wt = 0; bool torch = false, monAnim = false;
+            if (t == TILE_WALL) {
+                wt = wallTileAt(wx, wy);
+                torch = (wt == T_T && torchAt(wx, wy));
+                if (!torch) continue;                       // обычная стена — не трогаем
+            } else if (!isPlayer) {
+                if (!(monsterActiveAt(wx, wy, m) && m.anim > 1)) continue;   // нет живности — пропуск
+                monAnim = true;
+            }
+            // (клетка игрока перерисовывается всегда — «дыхание»)
+
+            TFT_eSprite *save = spr; spr = cellSpr;         // временно рисуем в клеточный спрайт
+            if (t == TILE_WALL) {
+                if (wt != T_VOID) blitTile(0, 0, SPRITES[wt]);
+                int tf = (int)(millis() / 110) % 8;
+                blitKeyedCentered(0, 0, SPR_PX, SPRITES[SPR_TORCH + tf]);
+            } else {
+                blitTile(0, 0, SPRITES[floorAt(wx, wy)]);
+                if (t == TILE_CHEST) { if (!chestOpenedAt(wx, wy)) blitKeyedCentered(0,0,SPR_PX,SPRITES[SPR_CHEST]); }
+                else if (t == TILE_MERCHANT) blitKeyedCentered(0,0,SPR_PX,SPRITES[SPR_TRADER]);
+                else if (t == TILE_STAIRS) blitKeyedCentered(0,0,SPR_PX,SPRITES[SPR_STAIRS]);
+                else if (t == TILE_ALTAR) { if (!altarUsedAt(wx,wy)) drawMarker(0,0,t); }
+                else if (t == TILE_EVENT) { if (!eventTriggeredAt(wx,wy)) drawMarker(0,0,t); }
+                else if (t == TILE_CAMP) drawMarker(0,0,t);
+                if (monAnim) {
+                    int fr = (int)(millis() / 400) % m.anim;
+                    blitKeyedCentered(0,0,SPR_PX,SPRITES[SPR_MON_BASE + m.spriteId + fr]);
+                }
+                if (isPlayer) {
+                    int pIdx = pMoving ? (SPR_KNIGHT_RUN + pRunF) : (SPR_KNIGHT_IDLE + pIdleF);
+                    blitKeyedCentered(0,0,SPR_PX,SPRITES[pIdx], pFlip);
+                }
+            }
+            drawArrowInCell(vx, vy);                        // стрелка управления, если попадает в клетку
+            spr = save;
+            cellSpr->pushSprite(MAP_X + vx*TILE, MAP_Y + vy*TILE);
+        }
 }

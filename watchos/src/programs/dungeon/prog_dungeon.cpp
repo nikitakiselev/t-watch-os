@@ -779,9 +779,9 @@ static void gameTick()
                 gamePlayerSetMoving(false, 0);
                 gamePlayerAnimAdvance();
             }
-            if (now - lastRedraw >= AMBIENT_REDRAW_MS) {   // частая перерисовка для пламени
-                lastRedraw = now;
-                gameRenderMap(px, py);
+            if (now - lastRedraw >= AMBIENT_REDRAW_MS) {   // частая перерисовка для пламени —
+                lastRedraw = now;                          // только анимированные клетки, не вся карта
+                gameRenderAnimated(px, py);
             }
         }
     }
