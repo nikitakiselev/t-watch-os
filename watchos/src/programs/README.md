@@ -155,7 +155,7 @@ static bool confirmDialog(const char *title)
 
 Список с прокруткой строится так же: храни `sel`/`top`, на `EVT_UP/DOWN` крути через
 `ListNav`/`listNavEvent` (`../../listnav.h`), на `EVT_TAP` — выбор. Примеры в игре: `combat.cpp`
-(`skillMenu`, меню зелий, инфо-карточки), `prog_game.cpp` (`itemDetailDialog`, торговец,
+(`skillMenu`, меню зелий, инфо-карточки), `prog_dungeon.cpp` (`itemDetailDialog`, торговец,
 инвентарь).
 
 ---

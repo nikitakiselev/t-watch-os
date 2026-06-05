@@ -1,4 +1,4 @@
-#include "prog_game.h"
+#include "prog_dungeon.h"
 #include "gamerender.h"
 #include "worldgen.h"
 #include "entities.h"
@@ -1299,6 +1299,6 @@ static void gameIcon(TFT_eSPI &g, int cx, int cy, int r)
     g.drawLine(cx - r / 2 - 3, cy + r / 2 - 1, cx - r / 2 + 3, cy + r / 2 + 3, COL_AMBER); // гарда
 }
 
-const Program gameProgram = {
+const Program dungeonProgram = {
     "Dungeon", gameEnter, gameTick, gameEvent, gameIcon, nullptr, -1, nullptr, gameExit
 };

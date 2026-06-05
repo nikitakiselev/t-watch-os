@@ -2,13 +2,13 @@
 # Сборка спрайтов: каждый спрайт — отдельный файл sprites/N.png (16x16, имя=индекс).
 # Ключ прозрачности — салатовый (0,255,0). Скрипт собирает их по порядку в:
 #   - sprites/sprites.png  (один лист 10 колонок, для просмотра)
-#   - ../watchos/src/programs/game/sprites_gen.h  (SPRITES[N][256] RGB565, ключ 0xF81F)
+#   - ../watchos/src/programs/dungeon/sprites_gen.h  (SPRITES[N][256] RGB565, ключ 0xF81F)
 import os, sys, zlib, struct
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from png2tiles import decode_png, rgb565
 
-DIR    = os.path.join(HERE, '..', 'watchos', 'src', 'programs', 'game', 'sprites')
+DIR    = os.path.join(HERE, '..', 'watchos', 'src', 'programs', 'dungeon', 'sprites')
 OUT_H  = os.path.join(DIR, '..', 'sprites_gen.h')
 OUT_PNG= os.path.join(DIR, 'sprites.png')
 PX, COLS, KEY = 16, 10, 0xF81F

@@ -2,7 +2,7 @@
 #include "src/programs/prog_clock.h"
 #include "src/programs/prog_wifi.h"
 #include "src/programs/prog_radio.h"
-#include "src/programs/game/prog_game.h"
+#include "src/programs/dungeon/prog_dungeon.h"
 #include "src/programs/prog_touchtest.h"
 #include "src/programs/prog_stopwatch.h"
 #include "src/programs/prog_settings.h"
@@ -22,7 +22,7 @@ static const Program *const appList[] = {
     &wifiProgram,
     &radioProgram,
     &assistantProgram,
-    &gameProgram,
+    &dungeonProgram,
     &touchtestProgram,
     &stopwatchProgram,
     &settingsProgram,
