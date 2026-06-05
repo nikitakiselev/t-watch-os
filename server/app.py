@@ -74,20 +74,22 @@ def speedtest_ping(request: Request):
 
 
 @app.get("/speedtest/down")
-async def speedtest_down(request: Request):
+async def speedtest_down(request: Request, mb: int = 128):
     settings = get_settings()
     if not _api_key_ok(request, settings):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+    # Поток ЖЁСТКО ограничен сверху (никогда не бесконечный — иначе клиент, который
+    # не закрылся, заставил бы сервер генерировать вечно, а TestClient вычитал бы тело
+    # целиком → OOM). Дефолт 128 MiB с запасом перекрывает 8 c фазы download на любой
+    # реальной скорости ESP32 WiFi; реальный клиент закрывает сокет раньше —
+    # is_disconnected/GeneratorExit останавливают цикл. Тесты передают маленький ?mb=.
     CHUNK = b"\0" * 16384
-    # Верхняя граница (1024 × 16 KiB = 16 MiB) — достаточно для замера нескольких
-    # секунд на скорости ESP32 WiFi; цикл прерывается раньше, когда клиент закрывает
-    # сокет (is_disconnected) или соединение рвётся (GeneratorExit/BrokenPipe).
-    MAX_CHUNKS = 1024
+    max_chunks = max(1, mb) * 64        # 64 чанка по 16 KiB = 1 MiB
 
     async def gen():
         try:
-            for _ in range(MAX_CHUNKS):
+            for _ in range(max_chunks):
                 if await request.is_disconnected():
                     return
                 yield CHUNK
