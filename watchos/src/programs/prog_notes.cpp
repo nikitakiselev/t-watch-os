@@ -363,6 +363,88 @@ static void newNote()
     kernelOpen(&notesRecProgram);
 }
 
-// ── временные заглушки (будут заменены в Task 6/7) ──
-static void openSelected() {}
+// ── Подтверждение удаления: true, если подтвердили ──
+static bool confirmDelete()
+{
+    const int w = 200, h = 120, x0 = (SCR_W - w) / 2, y0 = 50;
+    const int bh = 30, gap = 12, by0 = y0 + 46;
+    auto draw = [&](int sel) {
+        modalPanel(x0, y0, w, h, 10, COL_AMBER);
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString("Delete note?", SCR_W / 2, y0 + 22, 2);
+        const char *it[2] = { "Delete", "Cancel" };
+        const int bx = x0 + 14, bw = w - 28;
+        for (int i = 0; i < 2; i++) {
+            int by = by0 + i * (bh + gap);
+            if (i == sel) tft->fillRoundRect(bx, by, bw, bh, 6, COL_GREEN_DIM);
+            tft->drawRoundRect(bx, by, bw, bh, 6, i == sel ? COL_AMBER : COL_FRAME);
+            tft->setTextColor(COL_GREEN, i == sel ? COL_GREEN_DIM : COL_BG);
+            tft->drawString(it[i], SCR_W / 2, by + bh / 2, 2);
+        }
+    };
+    ListNav l{2, 0, 1, 0};                 // по умолчанию выделен Cancel (безопасно)
+    modalBegin();
+    draw(l.sel);
+    for (;;) {
+        int16_t x, y; InputEvent e = modalPoll(x, y);
+        if (e == EVT_BACK) return false;
+        if (e == EVT_UP || e == EVT_DOWN) { if (listNavEvent(l, e)) draw(l.sel); continue; }
+        if (e == EVT_TAP) {
+            if (x < x0 || x > x0 + w || y < y0 || y > y0 + h) return false;  // мимо — отмена
+        } else if (e != EVT_CLICK) continue;
+        return l.sel == 0;                 // Delete выбран?
+    }
+}
+
+// ── Контекстное меню заметки: Open / Delete ──
+static void noteMenu()
+{
+    const int w = 190, h = 120, x0 = (SCR_W - w) / 2, y0 = 50;
+    const int bh = 30, gap = 12, by0 = y0 + 40;
+    auto draw = [&](int sel) {
+        modalPanel(x0, y0, w, h, 10, COL_GREEN);
+        const char *it[2] = { "Open", "Delete" };
+        const int bx = x0 + 14, bw = w - 28;
+        tft->setTextDatum(MC_DATUM);
+        for (int i = 0; i < 2; i++) {
+            int by = by0 + i * (bh + gap);
+            if (i == sel) tft->fillRoundRect(bx, by, bw, bh, 6, COL_GREEN_DIM);
+            tft->drawRoundRect(bx, by, bw, bh, 6, i == sel ? COL_AMBER : COL_FRAME);
+            tft->setTextColor(COL_GREEN, i == sel ? COL_GREEN_DIM : COL_BG);
+            tft->drawString(it[i], SCR_W / 2, by + bh / 2, 2);
+        }
+    };
+    ListNav l{2, 0, 0, 0};
+    modalBegin();
+    draw(l.sel);
+    for (;;) {
+        int16_t x, y; InputEvent e = modalPoll(x, y);
+        if (e == EVT_BACK) { kernelRedraw(); return; }
+        if (e == EVT_UP || e == EVT_DOWN) { if (listNavEvent(l, e)) draw(l.sel); continue; }
+        if (e == EVT_TAP) {
+            if (x < x0 || x > x0 + w || y < y0 || y > y0 + h) { kernelRedraw(); return; }
+        } else if (e != EVT_CLICK) continue;
+        if (l.sel == 0) {                  // Open
+            openIdx = selected;
+            kernelOpen(&notesViewProgram);
+            return;
+        }
+        // Delete
+        if (confirmDelete()) {
+            notesRemove(selected);
+            if (selected >= noteCount) selected = noteCount > 0 ? noteCount - 1 : 0;
+        }
+        kernelRedraw();
+        return;
+    }
+}
+
+static void openSelected()
+{
+    if (noteCount == 0) return;
+    noteMenu();
+}
+
+// ── временная заглушка (будет заменена в Task 7) ──
 const Program notesViewProgram = { "Note", nullptr, nullptr, nullptr };
