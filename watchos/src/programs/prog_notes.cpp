@@ -446,5 +446,43 @@ static void openSelected()
     noteMenu();
 }
 
-// ── временная заглушка (будет заменена в Task 7) ──
-const Program notesViewProgram = { "Note", nullptr, nullptr, nullptr };
+// ───────────────────────── Просмотрщик заметки ─────────────────────────
+static TextView noteTV;
+static const int VIEW_TITLE_Y = STATUSBAR_H + 12;
+static const int VIEW_TOP     = STATUSBAR_H + 26;
+
+static void viewEnter()
+{
+    tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
+    statusbarDraw();
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("[ NOTE ]", SCR_W / 2, VIEW_TITLE_Y, 2);
+
+    textViewInit(noteTV, 8, VIEW_TOP, SCR_W - 12, CONTENT_BOTTOM - VIEW_TOP - 4);
+    textViewSetText(noteTV, (openIdx >= 0 && openIdx < noteCount) ? notes[openIdx] : "");
+    textViewDraw(noteTV);
+}
+
+static void viewEvent(InputEvent e, int16_t x, int16_t y)
+{
+    if (e == EVT_UP || e == EVT_DOWN) {
+        if (textViewEvent(noteTV, e)) textViewDraw(noteTV);
+    }
+}
+
+// Edit: перезаписать текущую заметку голосом.
+static void editNote()
+{
+    recTargetIdx = openIdx;
+    kernelOpen(&notesRecProgram);
+}
+
+static const NavButton viewNav[] = {
+    { "Back", kernelBack },
+    { "Edit", editNote },
+};
+
+const Program notesViewProgram = {
+    "Note", viewEnter, nullptr, viewEvent, nullptr, viewNav, 2, nullptr
+};
