@@ -13,7 +13,7 @@
 #define COL_GRID       RGB565(0x06, 0x20, 0x12)   // сетка фона
 #define COL_MAGENTA    RGB565(0xFF, 0x33, 0xCC)   // розово-маджента акцент (день недели, EST)
 #define COL_CYAN       RGB565(0x33, 0xCC, 0xFF)   // циан акцент (MSK-ромб, шкала секунд, UTC)
-#define COL_GREEN_GLOW RGB565(0x12, 0x66, 0x2E)   // тусклый ореол под яркими цифрами (фейк-свечение)
+#define COL_GREEN_GLOW RGB565(0x22, 0xAA, 0x55)   // ореол под яркими цифрами (фейк-свечение)
 
 #define COL_TEXT       COL_GREEN
 #define COL_ACCENT     COL_AMBER

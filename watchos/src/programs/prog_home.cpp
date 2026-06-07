@@ -12,8 +12,8 @@ static const int ZONE_Y     = 72;                  // ◆ MSK ............ UTC+3
 static const int BIG_Y      = 116;                 // крупные часы (font 7) + ореол
 static const int SECBAR_TOP = 156;                 // циановая шкала секунд
 static const int SECBAR_H   = 10;
-static const int ALT_Y      = 192;                 // EST ..  UTC ..
-static const int APPS_Y     = 224;                 // > APPS ▤ ........ [ tap ]
+static const int ALT_Y      = 188;                 // EST ..  UTC .. (над нижней панелью)
+static const int APPS_Y     = SCR_H - NAVBAR_H / 2; // центр нижней панели (как у навбара)
 
 static const int MARGIN = 14;
 
@@ -90,14 +90,15 @@ static void drawZoneRow()
 // Крупные часы с фейк-свечением: тусклый ореол со сдвигом ±1px, затем яркие цифры.
 static void drawBigClock(const char *hhmm)
 {
-    homeBand(BIG_Y - 28, 56);
+    homeBand(BIG_Y - 30, 60);
     tft->setTextDatum(MC_DATUM);
     int cx = SCR_W / 2;
-    tft->setTextColor(COL_GREEN_GLOW);                      // ореол (прозрачный фон → сетка видна)
-    tft->drawString(hhmm, cx - 1, BIG_Y,     7);
-    tft->drawString(hhmm, cx + 1, BIG_Y,     7);
-    tft->drawString(hhmm, cx,     BIG_Y - 1, 7);
-    tft->drawString(hhmm, cx,     BIG_Y + 1, 7);
+    // Ореол: 8 сдвигов ±1 (оси+диагонали) + ±2 по осям — даёт заметное «свечение».
+    tft->setTextColor(COL_GREEN_GLOW);                      // прозрачный фон → сетка видна
+    static const int8_t ox[] = { -1, 1, 0, 0, -1, -1, 1, 1, -2, 2, 0,  0 };
+    static const int8_t oy[] = { 0, 0, -1, 1, -1, 1, -1, 1,  0, 0, -2,  2 };
+    for (int i = 0; i < 12; i++)
+        tft->drawString(hhmm, cx + ox[i], BIG_Y + oy[i], 7);
     tft->setTextColor(COL_GREEN);                           // яркие цифры поверх
     tft->drawString(hhmm, cx, BIG_Y, 7);
 }
@@ -148,21 +149,55 @@ static void drawAltClocks(const RTC_Date &base)
     tft->drawString(utc, SCR_W / 2 + 42, ALT_Y, 4);
 }
 
-// > APPS ▤ ............ [ tap ]
+// Иконка-список у APPS медленно пульсирует зелёным (палитра тускл→ярк→тускл).
+static int appsIconX = 0;
+static const uint16_t PULSE[] = {
+    COL_GREEN_DIM,
+    RGB565(0x16, 0x80, 0x38),
+    RGB565(0x22, 0xAA, 0x55),
+    COL_GREEN,
+    COL_GREEN_HI,
+};
+static const int PULSE_N = sizeof(PULSE) / sizeof(PULSE[0]);
+static int lastPulse = -1;
+
+static void drawAppsIcon(uint16_t col)
+{
+    int iy = APPS_Y - 5;
+    tft->fillRect(appsIconX, iy - 1, 12, 12, COL_BG);          // очистить под иконкой
+    for (int i = 0; i < 3; i++) tft->fillRect(appsIconX, iy + i * 4, 12, 2, col);
+}
+
+// > APPS ▤ ............ [ tap ]  — панель высотой как штатный навбар.
 static void drawAppsBar()
 {
-    tft->fillRect(0, APPS_Y - 12, SCR_W, 24, COL_BG);
+    const int top = SCR_H - NAVBAR_H;
+    tft->fillRect(0, top, SCR_W, NAVBAR_H, COL_BG);
+    tft->drawFastHLine(0, top, SCR_W, COL_FRAME);             // разделитель как у навбара
+
     tft->setTextDatum(ML_DATUM);
-    tft->setTextColor(COL_GREEN);
+    tft->setTextColor(COL_GREEN, COL_BG);
     tft->drawString("> APPS", MARGIN, APPS_Y, 2);
-    int w = tft->textWidth("> APPS", 2);
-    // мини-иконка списка (3 полоски).
-    int ix = MARGIN + w + 8, iy = APPS_Y - 5;
-    for (int i = 0; i < 3; i++) tft->fillRect(ix, iy + i * 4, 12, 2, COL_GREEN);
+    appsIconX = MARGIN + tft->textWidth("> APPS", 2) + 8;
+    lastPulse = -1;
+    drawAppsIcon(PULSE[0]);
 
     tft->setTextDatum(MR_DATUM);
-    tft->setTextColor(COL_GREEN_DIM);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
     tft->drawString("[ tap ]", SCR_W - MARGIN, APPS_Y, 2);
+}
+
+// Шаг пульсации (зовётся из onTick): треугольная волна по палитре PULSE.
+static void tickAppsPulse()
+{
+    const uint32_t PERIOD = 2600;                            // полный цикл ~2.6 c
+    uint32_t ph = millis() % PERIOD;
+    int span = 2 * (PULSE_N - 1);                            // 0..span..0
+    int idx = (int)((uint64_t)ph * span / PERIOD);
+    if (idx >= PULSE_N) idx = span - idx;                    // отражение (затухание)
+    if (idx == lastPulse) return;
+    lastPulse = idx;
+    drawAppsIcon(PULSE[idx]);
 }
 
 static void homeEnter()
@@ -186,6 +221,8 @@ static void homeTick()
     RTC_Date now = hwNow();
     int h, m, s;
     hwTimeInZone(now, TZ_MSK_OFFSET_MIN, h, m, s);
+
+    tickAppsPulse();                        // медленная пульсация иконки APPS
 
     if (s != lastSec) {                     // секунда сменилась — обновить ТОЛЬКО шкалу
         lastSec = s;

@@ -19,9 +19,12 @@ static void drawBatteryGauge()
     int pctW = tft->textWidth(pct, 2);
 
     // Шкала слева от процента, в квадратных скобках.
+    // Ширину держим кратной числу сегментов — иначе на 100% справа остаётся
+    // незакрытый «хвост».
+    const int segs = 10, cellW = 5, gw = segs * cellW;     // 50px
     const int gh = 12, gy = (STATUSBAR_H - gh) / 2;
     const int gRight = pctX - pctW - 8;
-    const int gw = 52, gx = gRight - gw;
+    const int gx = gRight - gw;
 
     // Скобки [ ].
     tft->setTextDatum(MR_DATUM);
@@ -31,7 +34,6 @@ static void drawBatteryGauge()
     tft->drawString("[", gx - 7, STATUSBAR_H / 2, 2);
 
     // Сегменты: залитые слева, точечные справа (пустой остаток).
-    const int segs = 12, cellW = gw / segs;
     int on = (p * segs + 50) / 100;
     for (int i = 0; i < segs; i++) {
         int sx = gx + i * cellW;
