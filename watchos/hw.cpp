@@ -153,6 +153,29 @@ const char *hwAccelDirection(int16_t x, int16_t y, int16_t z)
     return y > 0 ? "RIGHT DN" : "LEFT DN";
 }
 
+// ─────────────────────────── Шагомер (BMA423) ───────────────────────────
+static bool stepReady = false;
+
+void hwStepBegin()
+{
+    if (stepReady) return;
+    hwAccelBegin();                                    // акселерометр должен быть включён
+    watch->bma->enableFeature(BMA423_STEP_CNTR, true); // аппаратный счётчик шагов
+    stepReady = true;
+}
+
+uint32_t hwStepCount()
+{
+    hwStepBegin();
+    return watch->bma->getCounter();
+}
+
+void hwStepReset()
+{
+    hwStepBegin();
+    watch->bma->resetStepCounter();
+}
+
 void hwTimeInZone(const RTC_Date &base, int offsetMin, int &h, int &m, int &s)
 {
     long total = (long)base.hour * 3600 + (long)base.minute * 60 + base.second;

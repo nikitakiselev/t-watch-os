@@ -49,3 +49,12 @@ void hwAccelToScreen(int16_t x, int16_t y, int16_t z, float &sx, float &sy);
 // Текущая ориентация по осям экрана. Возвращает одну из строк:
 //   "FACE UP" / "FACE DOWN" / "TOP DN" / "BOTTOM DN" / "LEFT DN" / "RIGHT DN".
 const char *hwAccelDirection(int16_t x, int16_t y, int16_t z);
+
+// ─────────────────────────── Шагомер (аппаратный, BMA423) ────────────────
+// BMA423 считает шаги в собственном железе — продолжает считать даже когда
+// ESP32 в light sleep (датчик питается отдельно от CPU). hwStepBegin включает
+// фичу (идемпотентно). Счётчик обнуляется при перезагрузке ESP32 (re-init BMA)
+// и по hwStepReset().
+void     hwStepBegin();
+uint32_t hwStepCount();    // накопленные шаги с момента включения/сброса
+void     hwStepReset();    // обнулить аппаратный счётчик

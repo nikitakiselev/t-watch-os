@@ -30,22 +30,45 @@ static String htmlEscape(const String &in)
 
 static void handleRoot()
 {
+    // Нумерованный жёлоб (gutter) слева от textarea: нумеруются только строки-
+    // станции (непустые и не начинающиеся с #), пустые/комментарии — без номера.
+    // Номера — чисто визуальные, в textarea и в файл не попадают. wrap=off, чтобы
+    // длинные URL не переносились и номера оставались напротив своих строк.
     String h =
         "<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>watchOS radio</title></head>"
-        "<body style='font-family:sans-serif;background:#111;color:#3f6;max-width:640px;margin:auto;padding:14px'>"
+        "<title>watchOS radio</title>"
+        "<style>"
+        "body{font-family:sans-serif;background:#111;color:#3f6;max-width:640px;margin:auto;padding:14px}"
+        ".wrap{display:flex;height:300px;border:1px solid #3f6;background:#000}"
+        "#gut{margin:0;padding:8px 6px;min-width:30px;line-height:20px;font:14px/20px monospace;"
+        "color:#9c9;text-align:right;white-space:pre;overflow:hidden;border-right:1px solid #243}"
+        "#list{flex:1;margin:0;padding:8px;line-height:20px;font:14px/20px monospace;background:#000;"
+        "color:#3f6;border:0;outline:0;resize:none;white-space:pre;overflow:auto}"
+        "</style></head>"
+        "<body>"
         "<h2>Radio stations</h2>"
         "<p style='color:#9c9'>One stream URL per line. Lines starting with # are ignored.</p>"
         "<form method=POST action=/save>"
-        "<textarea name=list spellcheck=false "
-        "style='width:100%;height:300px;background:#000;color:#3f6;font-size:14px;border:1px solid #3f6'>";
+        "<div class=wrap><pre id=gut></pre>"
+        "<textarea id=list name=list spellcheck=false wrap=off>";
     h += htmlEscape(readStations());
-    h += "</textarea><br><br>"
+    h += "</textarea></div><br>"
          "<button type=submit style='font-size:17px;padding:9px 22px;background:#3f6;color:#000;border:0'>Save</button>"
          "</form>"
          "<form method=POST action=/stop style='margin-top:18px'>"
          "<button type=submit style='font-size:14px;padding:7px 16px;background:#511;color:#f88;border:0'>Stop server</button>"
-         "</form></body></html>";
+         "</form>"
+         "<script>"
+         "var ta=document.getElementById('list'),g=document.getElementById('gut');"
+         "function upd(){var L=ta.value.split('\\n'),n=0,o=[];"
+         "for(var i=0;i<L.length;i++){var t=L[i].trim();"
+         "if(t&&t[0]!='#'){o.push(++n);}else{o.push('');}}"
+         "g.textContent=o.join('\\n');}"
+         "ta.addEventListener('input',upd);"
+         "ta.addEventListener('scroll',function(){g.scrollTop=ta.scrollTop;});"
+         "upd();"
+         "</script>"
+         "</body></html>";
     srv->send(200, "text/html", h);
 }
 

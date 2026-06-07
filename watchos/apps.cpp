@@ -5,6 +5,7 @@
 #include "src/programs/prog_settings.h"
 #include "src/programs/prog_assistant.h"
 #include "src/programs/prog_notes.h"
+#include "src/programs/prog_steps.h"
 
 // ─────────────────────── Реестр приложений ───────────────────────
 // Приложение — это обычная Program. Файлы программ лежат в src/programs/.
@@ -19,6 +20,7 @@ static const Program *const appList[] = {
     &radioProgram,
     &assistantProgram,
     &notesProgram,
+    &stepsProgram,
     &dungeonProgram,
     &settingsProgram,
 };
