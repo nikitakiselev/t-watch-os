@@ -13,6 +13,13 @@ def _build_messages(settings: Settings, history: list) -> list:
     return msgs
 
 
+def transcribe(settings: Settings, audio_lpcm: bytes) -> str:
+    # Чистый STT для голосовых заметок: ни GPT, ни TTS, ни истории сессий —
+    # просто распознаём речь в текст и отдаём его клиенту.
+    return yandex.stt_recognize(
+        audio_lpcm, api_key=settings.api_key, folder_id=settings.folder_id).strip()
+
+
 def process_turn(settings: Settings, session_id: str, audio_lpcm: bytes):
     # 1. Сохраняем входящую запись как WAV (нормализуем громкость — PDM-мик тихий).
     user_wav = sessions.next_user_audio_path(settings.data_dir, session_id)

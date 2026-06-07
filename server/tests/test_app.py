@@ -120,6 +120,48 @@ def test_talk_requires_session(tmp_path, monkeypatch):
     assert r.status_code == 422
 
 
+def test_stt_returns_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(appmod.pipeline, "transcribe", lambda s, audio: "купить молоко")
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/stt?session=x", content=b"\x00\x01",
+               headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 200
+    assert r.json() == {"text": "купить молоко"}
+
+
+def test_stt_empty_recording_returns_204(tmp_path, monkeypatch):
+    monkeypatch.setattr(appmod.pipeline, "transcribe", lambda s, audio: "")
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/stt?session=x", content=b"")
+    assert r.status_code == 204
+
+
+def test_stt_pipeline_error_returns_502(tmp_path, monkeypatch):
+    def boom(s, audio):
+        raise RuntimeError("yandex down")
+    monkeypatch.setattr(appmod.pipeline, "transcribe", boom)
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/stt?session=x", content=b"\x00\x01")
+    assert r.status_code == 502
+    assert "yandex down" in r.json()["error"]
+
+
+def test_stt_requires_api_key_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("API_KEY", "secret123")
+    monkeypatch.setattr(appmod.pipeline, "transcribe", lambda s, audio: "ok")
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/stt?session=x", content=b"\x00\x01")
+    assert r.status_code == 401
+    r = c.post("/stt?session=x", content=b"\x00\x01", headers={"X-API-Key": "secret123"})
+    assert r.status_code == 200
+
+
+def test_stt_requires_session(tmp_path, monkeypatch):
+    c = make_client(tmp_path, monkeypatch)
+    r = c.post("/stt", content=b"x")
+    assert r.status_code == 422
+
+
 def test_audio_serves_file(tmp_path, monkeypatch):
     d = tmp_path / "audio" / "sid"
     d.mkdir(parents=True)

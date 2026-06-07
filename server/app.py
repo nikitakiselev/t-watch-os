@@ -65,6 +65,23 @@ async def talk(session: str, request: Request):
     return JSONResponse({"url": url})
 
 
+@app.post("/stt")
+async def stt(session: str, request: Request):
+    # Голосовые заметки: распознать речь в текст (без GPT/TTS/истории).
+    settings = get_settings()
+    if not _api_key_ok(request, settings):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    audio_lpcm = await request.body()
+    try:
+        text = await run_in_threadpool(pipeline.transcribe, settings, audio_lpcm)
+    except Exception as e:
+        logging.getLogger(__name__).exception("stt failed")
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=502)
+    if not text:
+        return Response(status_code=204)            # речь не распознана
+    return JSONResponse({"text": text})
+
+
 @app.get("/speedtest/ping")
 def speedtest_ping(request: Request):
     settings = get_settings()

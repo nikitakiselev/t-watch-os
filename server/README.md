@@ -3,6 +3,12 @@
 Голосовой ассистент для часов: принимает LPCM-аудио + UUID сессии, делает
 Yandex SpeechKit STT → YandexGPT (с историей) → TTS, отдаёт URL mp3-ответа.
 
+Эндпоинты:
+- `POST /talk?session=<uuid>` — ассистент (STT→GPT→TTS), ответ `{"url": "...mp3"}`.
+- `POST /stt?session=<uuid>` — только распознавание для **голосовых заметок**
+  (приложение Notes на часах): тот же LPCM 16 кГц, ответ `{"text": "..."}` (UTF-8)
+  или `204`, если речь не распознана. Без GPT/TTS и без истории сессий.
+
 ## Запуск
 1. `cp server/.env.example server/.env` и заполнить ключи Yandex + `PUBLIC_BASE_URL`
    (LAN-IP машины, видимый часам — узнать через `ipconfig getifaddr en0`).
