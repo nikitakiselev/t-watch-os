@@ -1,13 +1,10 @@
 #include "apps.h"
 #include "src/programs/prog_clock.h"
-#include "src/programs/prog_wifi.h"
 #include "src/programs/prog_radio.h"
 #include "src/programs/dungeon/prog_dungeon.h"
-#include "src/programs/prog_touchtest.h"
-#include "src/programs/prog_stopwatch.h"
 #include "src/programs/prog_settings.h"
-#include "src/programs/prog_system.h"
 #include "src/programs/prog_assistant.h"
+#include "src/programs/prog_notes.h"
 
 // ─────────────────────── Реестр приложений ───────────────────────
 // Приложение — это обычная Program. Файлы программ лежат в src/programs/.
@@ -19,14 +16,11 @@
 
 static const Program *const appList[] = {
     &clockProgram,
-    &wifiProgram,
     &radioProgram,
     &assistantProgram,
+    &notesProgram,
     &dungeonProgram,
-    &touchtestProgram,
-    &stopwatchProgram,
     &settingsProgram,
-    &systemProgram,
 };
 
 const Program *const *APPS       = appList;
