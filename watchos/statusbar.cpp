@@ -3,39 +3,55 @@
 #include "theme.h"
 #include "wifi.h"
 
+// Батарея-шкала справа: [сегменты + точечный «пустой»] NN%. В стиле макета.
+static void drawBatteryGauge()
+{
+    int p = hwBattPercent();
+    uint16_t col = (p <= 20) ? COL_AMBER : COL_GREEN;
+
+    // Процент — у правого края.
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%d%%", p);
+    tft->setTextDatum(MR_DATUM);
+    tft->setTextColor(col, COL_BG);
+    int pctX = SCR_W - 6;
+    tft->drawString(pct, pctX, STATUSBAR_H / 2, 2);
+    int pctW = tft->textWidth(pct, 2);
+
+    // Шкала слева от процента, в квадратных скобках.
+    const int gh = 12, gy = (STATUSBAR_H - gh) / 2;
+    const int gRight = pctX - pctW - 8;
+    const int gw = 52, gx = gRight - gw;
+
+    // Скобки [ ].
+    tft->setTextDatum(MR_DATUM);
+    tft->setTextColor(col, COL_BG);
+    tft->drawString("]", gRight + 7, STATUSBAR_H / 2, 2);
+    tft->setTextDatum(ML_DATUM);
+    tft->drawString("[", gx - 7, STATUSBAR_H / 2, 2);
+
+    // Сегменты: залитые слева, точечные справа (пустой остаток).
+    const int segs = 12, cellW = gw / segs;
+    int on = (p * segs + 50) / 100;
+    for (int i = 0; i < segs; i++) {
+        int sx = gx + i * cellW;
+        if (i < on) tft->fillRect(sx, gy + 1, cellW - 1, gh - 2, col);
+        else        tft->drawPixel(sx + cellW / 2, gy + gh / 2, COL_AMBER_DIM);
+    }
+
+    // Уровень Wi-Fi (если радио активно) — слева от шкалы.
+    if (wifiActive()) {
+        drawSignalBars(*tft, gx - 26, STATUSBAR_H - 5, wifiConnected() ? wifiRssi() : -100,
+                       COL_GREEN, COL_GREEN_DIM);
+    }
+}
+
 void statusbarDraw()
 {
     tft->fillRect(0, 0, SCR_W, STATUSBAR_H, COL_BG);
+    drawBatteryGauge();
 
-    int p = hwBattPercent();
-
-    // Батарея с секциями (нарисованная).
-    const int bx = 6, by = 5, bw = 50, bh = 14, segs = 5;
-    uint16_t col = (p <= 20) ? COL_AMBER : COL_GREEN;
-
-    tft->drawRoundRect(bx, by, bw, bh, 2, col);          // корпус
-    tft->fillRect(bx + bw + 1, by + 4, 3, bh - 8, col);  // колпачок
-
-    int filled = (p * segs + 50) / 100;                  // сколько секций залить
-    int cellW  = (bw - 4) / segs;
-    for (int i = 0; i < filled && i < segs; i++) {
-        int sx = bx + 2 + i * cellW;
-        tft->fillRect(sx, by + 2, cellW - 1, bh - 4, col);
-    }
-
-    // Процент рядом.
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d%%", p);
-    tft->setTextDatum(ML_DATUM);
-    tft->setTextColor(col, COL_BG);
-    tft->drawString(buf, bx + bw + 10, by + bh / 2, 2);
-
-    // Уровень сигнала Wi-Fi справа, если радио активно (как в списке сетей).
-    // Нет связи → все столбики тусклые (rssi -100).
-    if (wifiActive()) {
-        drawSignalBars(*tft, SCR_W - 22, 19, wifiConnected() ? wifiRssi() : -100,
-                       COL_GREEN, COL_GREEN_DIM);
-    }
-
-    tft->drawFastHLine(0, STATUSBAR_H - 1, SCR_W, COL_FRAME);
+    // Пунктирный разделитель снизу (в духе макета).
+    for (int x = 0; x < SCR_W; x += 8)
+        tft->drawFastHLine(x, STATUSBAR_H - 1, 4, COL_AMBER_DIM);
 }
