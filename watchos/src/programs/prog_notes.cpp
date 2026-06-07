@@ -292,9 +292,14 @@ static void recStop()
     }
 }
 
+// Идемпотентное удержание Wi-Fi: acquire ровно один раз за «жизнь» программы,
+// release ровно один раз. Иначе повторный onEnter (пробуждение из сна, т.к.
+// onResume не задан) утёк бы refCount и Wi-Fi не выключился при выходе.
+static bool recWifiHeld = false;
+
 static void recEnter()
 {
-    wifiAcquire();
+    if (!recWifiHeld) { wifiAcquire(); recWifiHeld = true; }
     if (!wifiConnected()) {
         tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
         statusbarDraw();
@@ -311,12 +316,18 @@ static void recEnter()
     recDraw();
 }
 
+// Пробуждение из сна: только перерисовать — НЕ трогать Wi-Fi/буфер заново.
+static void recResume()
+{
+    recDraw();
+}
+
 static void recExit()
 {
     if (rState == RS_REC) micCaptureEnd();
     if (recBuf) { free(recBuf); recBuf = nullptr; }
     rState = RS_IDLE;
-    wifiRelease();
+    if (recWifiHeld) { wifiRelease(); recWifiHeld = false; }
 }
 
 static void recTick()
@@ -344,7 +355,7 @@ static bool recKeepAwake() { return rState != RS_IDLE && rState != RS_NOWIFI; }
 static const NavButton recNav[] = { { "Cancel", kernelBack } };
 
 const Program notesRecProgram = {
-    "Rec", recEnter, recTick, nullptr, nullptr, recNav, 1, recKeepAwake, recExit
+    "Rec", recEnter, recTick, nullptr, nullptr, recNav, 1, recKeepAwake, recExit, recResume
 };
 
 // New Note: открыть запись для новой заметки.

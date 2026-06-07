@@ -121,11 +121,16 @@ static void drawScreen()
     if (state != ST_RECORDING && state != ST_NOWIFI) drawVolume();   // в записи тут счётчик секунд
 }
 
+// Идемпотентное удержание Wi-Fi: acquire/release ровно по разу за «жизнь»
+// программы (защита от повторного onEnter — пробуждение идёт через onResume,
+// но guard страхует и любой иной повторный вход, чтобы refCount не утёк).
+static bool assistantWifiHeld = false;
+
 // onEnter — только при настоящем входе (kernelOpen/возврат), НЕ на пробуждении:
 // пробуждение идёт через onResume (ядро). Поэтому здесь честно один acquire/genSession.
 static void assistantEnter()
 {
-    wifiAcquire();
+    if (!assistantWifiHeld) { wifiAcquire(); assistantWifiHeld = true; }
     if (!wifiConnected()) {
         tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
         statusbarDraw();
@@ -156,7 +161,7 @@ static void assistantExit()
     audioStop();
     if (recBuf) { free(recBuf); recBuf = nullptr; }
     state = ST_IDLE;
-    wifiRelease();
+    if (assistantWifiHeld) { wifiRelease(); assistantWifiHeld = false; }
 }
 
 static bool assistantKeepAwake() { return state != ST_IDLE && state != ST_NOWIFI; }

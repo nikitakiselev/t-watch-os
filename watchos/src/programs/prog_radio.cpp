@@ -538,9 +538,14 @@ static void centerMsg(const char *msg, uint16_t col)
 }
 
 // ─────────────────── Программа ───────────────────
+// Идемпотентное удержание Wi-Fi: acquire/release ровно по разу за «жизнь»
+// программы. Иначе повторный onEnter (пробуждение из сна — onResume не задан)
+// утёк бы refCount, и Wi-Fi не выключился бы при выходе из радио.
+static bool radioWifiHeld = false;
+
 static void radioEnter()
 {
-    wifiAcquire();
+    if (!radioWifiHeld) { wifiAcquire(); radioWifiHeld = true; }
 
     if (!wifiConnected()) {
         centerMsg("connecting...", COL_AMBER);
@@ -563,7 +568,7 @@ static void radioExit()
     audioStop();
     paused = false;
     ok = false;
-    wifiRelease();
+    if (radioWifiHeld) { wifiRelease(); radioWifiHeld = false; }
 }
 
 static void radioTick()
