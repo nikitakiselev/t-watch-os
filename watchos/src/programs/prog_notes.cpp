@@ -5,6 +5,9 @@
 #include "../../listnav.h"
 #include "../../modal.h"
 #include "../../textview.h"
+#include "../../wifi.h"
+#include "../../sound.h"
+#include "../../aiclient.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
 #include <string.h>
@@ -186,8 +189,180 @@ const Program notesProgram = {
     "Notes", notesEnter, nullptr, notesEvent, notesIcon, notesNav, 2, nullptr
 };
 
-// ── временные заглушки (будут заменены в Task 5/6/7) ──
-static void newNote() {}
+// ───────────────────────── Запись голоса ─────────────────────────
+enum RState { RS_IDLE, RS_REC, RS_SENDING, RS_NOWIFI };
+static RState rState = RS_IDLE;
+static char    recSession[40] = "";
+static int16_t *recBuf = nullptr;
+static int      recSamples = 0;
+static const int REC_MAX_SECONDS = 15;
+static const int REC_SR = 16000;
+static const int REC_CAP = REC_SR * REC_MAX_SECONDS;
+
+static const int RBTN_CX = SCR_W / 2, RBTN_CY = 116, RBTN_R = 66;
+static const int RTIMER_Y = RBTN_CY - RBTN_R - 12;
+
+static void recGenSession()
+{
+    uint32_t a = esp_random(), b = esp_random(), c = esp_random(), d = esp_random();
+    snprintf(recSession, sizeof(recSession),
+             "%08x-%04x-4%03x-%04x-%08x%04x",
+             a, b & 0xffff, (c & 0x0fff), (d & 0x3fff) | 0x8000, b, d & 0xffff);
+}
+
+static void recMicIcon(int cx, int cy, uint16_t c)
+{
+    tft->fillRoundRect(cx - 9, cy - 22, 18, 30, 9, c);
+    tft->drawFastHLine(cx - 13, cy + 14, 26, c);
+    tft->drawFastVLine(cx, cy + 8, 6, c);
+}
+static void recDotsIcon(int cx, int cy, uint16_t c)
+{
+    tft->fillCircle(cx - 16, cy, 4, c);
+    tft->fillCircle(cx,      cy, 4, c);
+    tft->fillCircle(cx + 16, cy, 4, c);
+}
+
+static void recDrawButton(uint16_t col)
+{
+    tft->fillRect(0, CONTENT_TOP, SCR_W, CONTENT_BOTTOM - CONTENT_TOP, COL_BG);
+    tft->drawCircle(RBTN_CX, RBTN_CY, RBTN_R, col);
+    tft->drawCircle(RBTN_CX, RBTN_CY, RBTN_R - 1, col);
+    if (rState == RS_SENDING) recDotsIcon(RBTN_CX, RBTN_CY, col);
+    else                      recMicIcon(RBTN_CX, RBTN_CY, col);
+}
+
+static void recDraw()
+{
+    tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
+    statusbarDraw();
+    if (rState != RS_REC) {
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString(recTargetIdx < 0 ? "NEW NOTE" : "EDIT NOTE",
+                        SCR_W / 2, STATUSBAR_H + 12, 2);
+    }
+    switch (rState) {
+    case RS_IDLE:    recDrawButton(COL_GREEN);     break;
+    case RS_REC:     recDrawButton(COL_AMBER);     break;
+    case RS_SENDING: recDrawButton(COL_GREEN_DIM); break;
+    case RS_NOWIFI:
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString("no wifi", SCR_W / 2, RBTN_CY, 4);
+        break;
+    }
+}
+
+static bool recTouchDown() { int16_t x, y; return watch->getTouch(x, y); }
+static bool recTouchInBtn()
+{
+    int16_t x, y;
+    if (!watch->getTouch(x, y)) return false;
+    int dx = x - RBTN_CX, dy = y - RBTN_CY;
+    return dx * dx + dy * dy <= RBTN_R * RBTN_R;
+}
+
+static void recStart()
+{
+    if (!recBuf) { soundBeep(400, 120); return; }
+    if (!micCaptureBegin()) { soundBeep(400, 120); return; }
+    recSamples = 0;
+    rState = RS_REC;
+    recDraw();
+}
+
+static void recStop()
+{
+    micCaptureEnd();
+    if (recSamples < REC_SR * 3 / 10) { rState = RS_IDLE; recDraw(); return; }
+
+    rState = RS_SENDING; recDraw();
+    if (!wifiConnected()) wifiAutoConnect(8000, nullptr);
+    if (!wifiConnected()) { soundBeep(300, 120); rState = RS_IDLE; recDraw(); return; }
+
+    AiText res = aiTranscribe(recSession, recBuf, recSamples);   // блокирует ~5-10 c
+    if (res.code == 200 && res.text.length() > 0) {
+        int idx = notesStore(recTargetIdx, res.text.c_str());
+        if (idx >= 0 && recTargetIdx < 0) selected = idx;        // выделить новую
+        kernelBack();                                            // назад (список/просмотр)
+    } else {
+        soundBeep(res.code == 204 ? 600 : 300, 120);
+        rState = RS_IDLE; recDraw();
+    }
+}
+
+static void recEnter()
+{
+    wifiAcquire();
+    if (!wifiConnected()) {
+        tft->fillRect(0, 0, SCR_W, CONTENT_BOTTOM, COL_BG);
+        statusbarDraw();
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString("connecting...", SCR_W / 2, RBTN_CY, 4);
+        wifiAutoConnect(12000, nullptr);
+    }
+    if (!wifiConnected()) { rState = RS_NOWIFI; recDraw(); return; }
+
+    recGenSession();
+    if (!recBuf) recBuf = (int16_t *)ps_malloc((size_t)REC_CAP * sizeof(int16_t));
+    rState = RS_IDLE; recSamples = 0;
+    recDraw();
+}
+
+static void recExit()
+{
+    if (rState == RS_REC) micCaptureEnd();
+    if (recBuf) { free(recBuf); recBuf = nullptr; }
+    rState = RS_IDLE;
+    wifiRelease();
+}
+
+static void recTick()
+{
+    if (rState == RS_IDLE && recTouchInBtn()) { recStart(); return; }
+    if (rState == RS_REC) {
+        if (recSamples < REC_CAP)
+            recSamples += micCaptureRead(recBuf + recSamples, REC_CAP - recSamples);
+        static int lastSec = -1;
+        int sec = recSamples / REC_SR;
+        if (sec != lastSec) {
+            lastSec = sec;
+            char b[8]; snprintf(b, sizeof(b), "%ds", sec);
+            tft->fillRect(RBTN_CX - 40, RTIMER_Y - 14, 80, 28, COL_BG);
+            tft->setTextDatum(MC_DATUM);
+            tft->setTextColor(COL_AMBER, COL_BG);
+            tft->drawString(b, RBTN_CX, RTIMER_Y, 4);
+        }
+        if (!recTouchDown() || recSamples >= REC_CAP) recStop();
+    }
+}
+
+static bool recKeepAwake() { return rState != RS_IDLE && rState != RS_NOWIFI; }
+
+static const NavButton recNav[] = { { "Cancel", kernelBack } };
+
+const Program notesRecProgram = {
+    "Rec", recEnter, recTick, nullptr, nullptr, recNav, 1, recKeepAwake, recExit
+};
+
+// New Note: открыть запись для новой заметки.
+static void newNote()
+{
+    if (noteCount >= NOTES_MAX) {           // нет места — оверлей «full»
+        tft->fillRect(0, LIST_TOP, SCR_W, CONTENT_BOTTOM - LIST_TOP, COL_BG);
+        tft->setTextDatum(MC_DATUM);
+        tft->setTextColor(COL_AMBER, COL_BG);
+        tft->drawString("full", SCR_W / 2, (LIST_TOP + CONTENT_BOTTOM) / 2, 4);
+        delay(700);
+        drawList();
+        return;
+    }
+    recTargetIdx = -1;
+    kernelOpen(&notesRecProgram);
+}
+
+// ── временные заглушки (будут заменены в Task 6/7) ──
 static void openSelected() {}
 const Program notesViewProgram = { "Note", nullptr, nullptr, nullptr };
-const Program notesRecProgram  = { "Rec",  nullptr, nullptr, nullptr };
