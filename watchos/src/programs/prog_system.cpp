@@ -3,14 +3,18 @@
 #include "../../statusbar.h"
 #include "../../theme.h"
 #include "../../batterytime.h"
+#include "../../keyboard.h"
 #include <esp_system.h>
 #include <math.h>
 
 // ─────────────────────────────── Вкладки ───────────────────────────────
 // SENSOR — диагностика ёмкостного тача (бывшая отдельная программа Touch).
 // ACCEL  — тест акселерометра BMA423 (уровень + ориентация + сырые X/Y/Z).
-enum { TAB_CHIP = 0, TAB_MEM, TAB_RUNTIME, TAB_BATT, TAB_SENSOR, TAB_ACCEL, NUM_TABS };
-static const char *const TAB_NAME[NUM_TABS] = { "CHIP", "MEMORY", "RUNTIME", "BATTERY", "SENSOR", "ACCEL" };
+enum { TAB_CHIP = 0, TAB_MEM, TAB_RUNTIME, TAB_BATT, TAB_SENSOR, TAB_ACCEL, TAB_KEYBOARD, NUM_TABS };
+static const char *const TAB_NAME[NUM_TABS] = { "CHIP", "MEMORY", "RUNTIME", "BATTERY", "SENSOR", "ACCEL", "KEYBOARD" };
+
+// Вкладка KEYBOARD: тест экранной клавиатуры — последний введённый текст.
+static char kbText[64] = "";
 
 static int          curTab    = 0;
 static unsigned long lastBody = 0;   // троттлинг перерисовки динамики
@@ -148,6 +152,50 @@ static void bodyRuntime()
     drawRow(4, "Date",   buf);
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d", d.hour, d.minute, d.second);
     drawRow(5, "Time MSK", buf);
+}
+
+// Тест экранной клавиатуры: подсказка + последний введённый текст (с переносом).
+static void bodyKeyboard()
+{
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(COL_GREEN_DIM, COL_BG);
+    tft->drawString("tap [ Type ] to test", SCR_W / 2, BODY_TOP + 14, 2);
+
+    // Рамка поля ввода.
+    const int fx = TAP_EDGE, fy = BODY_TOP + 34, fw = SCR_W - 2 * TAP_EDGE, fh = 92;
+    tft->drawRoundRect(fx, fy, fw, fh, 6, COL_FRAME);
+
+    tft->setTextDatum(TL_DATUM);
+    if (kbText[0] == 0) {
+        tft->setTextColor(COL_GREEN_DIM, COL_BG);
+        tft->drawString("(empty)", fx + 10, fy + 10, 2);
+        return;
+    }
+    // Перенос длинного текста по ширине поля (моноширинный font 1 ~6px/символ).
+    tft->setTextColor(COL_GREEN, COL_BG);
+    const int perLine = (fw - 16) / 6;
+    char line[48];
+    int n = strlen(kbText), row = 0;
+    for (int i = 0; i < n && row < 9; i += perLine, row++) {
+        int len = (n - i < perLine) ? (n - i) : perLine;
+        if (len > (int)sizeof(line) - 1) len = sizeof(line) - 1;
+        memcpy(line, kbText + i, len);
+        line[len] = 0;
+        tft->drawString(line, fx + 8, fy + 8 + row * 10, 1);
+    }
+}
+
+static void drawChrome();
+static void drawBody();
+static void drawNavbar();
+
+// Открыть клавиатуру, запомнить введённое, перерисовать (клавиатура затёрла экран).
+static void runKeyboardTest()
+{
+    keyboardPrompt("KEYBOARD TEST", kbText, sizeof(kbText));
+    drawChrome();
+    drawBody();
+    drawNavbar();
 }
 
 static void bodyBatt()
@@ -345,6 +393,7 @@ static void drawBody()
     case TAB_BATT:    bodyBatt();    break;
     case TAB_SENSOR:  bodySensor();  break;
     case TAB_ACCEL:   bodyAccel();   break;
+    case TAB_KEYBOARD: bodyKeyboard(); break;
     }
     lastBody = millis();
 }
@@ -358,13 +407,13 @@ static void drawNavbar()
     tft->drawFastHLine(0, top, SCR_W, COL_FRAME);
     tft->setTextDatum(MC_DATUM);
 
-    if (curTab == TAB_SENSOR) {
+    if (curTab == TAB_SENSOR || curTab == TAB_KEYBOARD) {
         const int w = SCR_W / 2;
         tft->setTextColor(COL_AMBER, COL_BG);
         tft->drawString("Back", w / 2, top + NAVBAR_H / 2, 2);
         tft->drawFastVLine(w, top + 5, NAVBAR_H - 10, COL_FRAME);
         tft->setTextColor(COL_GREEN, COL_BG);
-        tft->drawString("Clear", w + w / 2, top + NAVBAR_H / 2, 2);
+        tft->drawString(curTab == TAB_KEYBOARD ? "Type" : "Clear", w + w / 2, top + NAVBAR_H / 2, 2);
     } else {
         tft->setTextColor(COL_AMBER, COL_BG);
         tft->drawString("Back", SCR_W / 2, top + NAVBAR_H / 2, 2);
@@ -416,9 +465,10 @@ static void sysEnter()
 
 static void sysTick()
 {
-    if (curTab == TAB_SENSOR) { sensorPoll(); return; }  // на тесте тача не затираем точки
-    if (curTab == TAB_ACCEL)  { accelPoll();  return; }  // живой опрос акселерометра
-    if (millis() - lastBody >= 800) drawBody();          // обновляем динамику ~раз в 0.8 c
+    if (curTab == TAB_SENSOR)   { sensorPoll(); return; }  // на тесте тача не затираем точки
+    if (curTab == TAB_ACCEL)    { accelPoll();  return; }  // живой опрос акселерометра
+    if (curTab == TAB_KEYBOARD) return;                    // статичное поле — не перерисовываем
+    if (millis() - lastBody >= 800) drawBody();            // обновляем динамику ~раз в 0.8 c
 }
 
 static void sysEvent(InputEvent e, int16_t x, int16_t y)
@@ -428,8 +478,9 @@ static void sysEvent(InputEvent e, int16_t x, int16_t y)
     // Переключение только тапом по боковым стрелкам.
     case EVT_TAP:
         if (y >= SCR_H - NAVBAR_H) {               // тап по навбару (рисуем его сами)
-            if (curTab == TAB_SENSOR && x >= SCR_W / 2) drawBody();  // Clear
-            else                                        kernelBack();
+            if (curTab == TAB_SENSOR && x >= SCR_W / 2)        drawBody();        // Clear
+            else if (curTab == TAB_KEYBOARD && x >= SCR_W / 2) runKeyboardTest(); // Type
+            else                                               kernelBack();
         } else if (x < TAP_EDGE) {
             switchTab(-1);                          // тап по левой стрелке
         } else if (x > SCR_W - TAP_EDGE) {

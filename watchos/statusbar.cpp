@@ -8,6 +8,7 @@
 // рисовать поверх полноэкранных программ (игра и т.п.), которые статусбар не зовут.
 static const Program *g_sbProg = nullptr;
 static int            sbLastMin = -1;
+static bool           g_sbShowTime = true;   // главный экран отключает (дублирует часы)
 
 // Время MSK слева (HH:MM). Обновляется раз в минуту.
 static void drawStatusTime()
@@ -65,10 +66,11 @@ static void drawBatteryGauge()
     }
 }
 
-void statusbarDraw()
+void statusbarDraw(bool showTime)
 {
     tft->fillRect(0, 0, SCR_W, STATUSBAR_H, COL_BG);
-    drawStatusTime();
+    g_sbShowTime = showTime;
+    if (showTime) drawStatusTime();
     drawBatteryGauge();
 
     // Пунктирный разделитель снизу (в духе макета).
@@ -80,6 +82,7 @@ void statusbarDraw()
 
 void statusbarTick()
 {
+    if (!g_sbShowTime) return;                       // на этом экране время не показываем
     if (kernelCurrent() != g_sbProg) return;        // текущая программа не показывает статусбар
     // Раз в секунду проверяем смену минуты (RTC по I2C — не дёргаем каждый кадр).
     static uint32_t lastCheck = 0;

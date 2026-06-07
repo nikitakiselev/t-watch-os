@@ -37,6 +37,15 @@ static void homeBand(int y0, int h)
         tft->drawFastHLine(0, gy, SCR_W, COL_GRID);
 }
 
+// Статусбар главного: без времени (дублирует крупные часы) + wordmark T-WATCH слева.
+static void homeStatusbar()
+{
+    statusbarDraw(false);
+    tft->setTextDatum(ML_DATUM);
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("T-WATCH", 6, STATUSBAR_H / 2, 2);
+}
+
 // SUN · 2026.06.07  (день недели — маджента, дата — зелёная).
 static void drawDate(const RTC_Date &d)
 {
@@ -189,7 +198,7 @@ static void homeEnter()
 {
     themeBackdrop();
     drawGrid();
-    statusbarDraw();
+    homeStatusbar();
 
     RTC_Date now = hwNow();
     drawDate(now);
@@ -223,7 +232,7 @@ static void homeTick()
     snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
     drawBigClock(buf);
     drawAltClocks(now);
-    statusbarDraw();
+    homeStatusbar();
 }
 
 // Тап по экрану — открыть список приложений ([ tap ] в макете).
