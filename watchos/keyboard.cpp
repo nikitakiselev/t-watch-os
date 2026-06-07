@@ -21,18 +21,22 @@ static const char *SETS[] = {
     "pqrs7", "tuv8", "wxyz9", // 6, 7, 8
     " 0",                  // 9: пробел / 0
 };
-static const char *GRID_LO[] = { "1#", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz" };
-static const char *GRID_UP[] = { "1#", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ" };
+static const char *GRID_LO[]  = { "1#", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz" };
+static const char *GRID_UP[]  = { "1#", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ" };
+static const char *GRID_NUM[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+
+// Режим раскладки: клавиша «aA» в нижнем ряду циклирует строчные → ПРОПИСНЫЕ → цифры.
+enum { MODE_LOWER, MODE_UPPER, MODE_DIGITS };
 
 static char    *buf;
 static int      maxLen;
 static int      len;
-static bool     upper;
+static int      mode;          // MODE_LOWER / MODE_UPPER / MODE_DIGITS
 static int      pendingSet;
 static int      pendingIdx;
 static uint32_t lastTap;
 
-static char applyCase(char c) { return (upper && c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
+static char applyCase(char c) { return (mode == MODE_UPPER && c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
 
 static void drawKey(int x, int y, int w, int h, const char *label, uint16_t col)
 {
@@ -62,14 +66,16 @@ static void drawKeyboard(const char *title)
     tft->drawString(title, SCR_W / 2, TITLE_Y, 2);
     drawField();
 
-    const char *const *G = upper ? GRID_UP : GRID_LO;
+    const char *const *G = (mode == MODE_DIGITS) ? GRID_NUM
+                         : (mode == MODE_UPPER)  ? GRID_UP : GRID_LO;
     for (int s = 0; s < 9; s++) {
         int row = s / 3, col = s % 3;
         drawKey(col * (SCR_W / 3), KB_TOP + row * KH, SCR_W / 3, KH, G[s], COL_GREEN);
     }
     int y3 = KB_TOP + 3 * KH, w4 = SCR_W / 4;
-    drawKey(0 * w4, y3, w4, KH, upper ? "AB" : "ab", COL_GREEN);
-    drawKey(1 * w4, y3, w4, KH, "spc",  COL_GREEN);
+    const char *modeLbl = (mode == MODE_DIGITS) ? "12" : (mode == MODE_UPPER) ? "AB" : "ab";
+    drawKey(0 * w4, y3, w4, KH, modeLbl, COL_GREEN);
+    drawKey(1 * w4, y3, w4, KH, (mode == MODE_DIGITS) ? "0" : "spc", COL_GREEN);
     drawKey(2 * w4, y3, w4, KH, "<",    COL_GREEN);
     drawKey(3 * w4, y3, w4, KH, "OK",   COL_AMBER);
 }
@@ -93,6 +99,16 @@ static void typeKey(int set)
     drawField();
 }
 
+// Прямой ввод одного символа без мультитапа (для режима цифр).
+static void typeChar(char c)
+{
+    if (len >= maxLen - 1) return;
+    buf[len++] = c;
+    buf[len] = 0;
+    pendingSet = -1;
+    drawField();
+}
+
 static void backspace()
 {
     if (len > 0) { buf[--len] = 0; pendingSet = -1; drawField(); }
@@ -104,7 +120,7 @@ bool keyboardPrompt(const char *title, char *out, int outLen)
     maxLen = outLen;
     len = 0;
     buf[0] = 0;
-    upper = false;
+    mode = MODE_LOWER;
     pendingSet = -1;
     pendingIdx = 0;
     lastTap = 0;
@@ -123,12 +139,18 @@ bool keyboardPrompt(const char *title, char *out, int outLen)
                 int row = (y - KB_TOP) / KH;
                 if (row >= 0 && row < 3) {
                     int col = x / (SCR_W / 3); if (col > 2) col = 2;
-                    typeKey(row * 3 + col);
+                    int s = row * 3 + col;
+                    if (mode == MODE_DIGITS) typeChar('1' + s);   // 1..9, по одному тапу
+                    else                     typeKey(s);
                 } else if (row == 3) {
                     int col = x / (SCR_W / 4); if (col > 3) col = 3;
                     switch (col) {
-                    case 0: upper = !upper; pendingSet = -1; drawKeyboard(title); break;
-                    case 1: typeKey(9); break;       // пробел / 0
+                    case 0:                                       // циклируем режим строчные→ПРОПИСНЫЕ→цифры
+                        mode = (mode + 1) % 3; pendingSet = -1; drawKeyboard(title); break;
+                    case 1:
+                        if (mode == MODE_DIGITS) typeChar('0');    // в режиме цифр — прямой 0
+                        else                     typeKey(9);       // иначе пробел / 0 (мультитап)
+                        break;
                     case 2: backspace(); break;
                     case 3: return true;             // OK
                     }
