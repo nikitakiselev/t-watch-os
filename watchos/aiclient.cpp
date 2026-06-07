@@ -74,3 +74,56 @@ AiResult aiSend(const char *uuid, const int16_t *pcm, int samples)
     http.end();
     return r;
 }
+
+// Достать значение "text" из тела {"text":"..."} с минимальным un-escape
+// (\" \\ \n). Сервер обязан слать сырой UTF-8 без \uXXXX.
+static String extractText(const String &body)
+{
+    int k = body.indexOf("\"text\"");
+    if (k < 0) return "";
+    int c = body.indexOf(':', k);
+    if (c < 0) return "";
+    int q1 = body.indexOf('"', c + 1);
+    if (q1 < 0) return "";
+    String out;
+    for (int i = q1 + 1; i < (int)body.length(); i++) {
+        char ch = body[i];
+        if (ch == '\\') {
+            i++;
+            if (i >= (int)body.length()) break;
+            char e = body[i];
+            if      (e == 'n') out += '\n';
+            else if (e == 't') out += ' ';
+            else               out += e;     // \" \\ и прочее — как есть
+            continue;
+        }
+        if (ch == '"') break;                 // конец строки JSON
+        out += ch;
+    }
+    return out;
+}
+
+AiText aiTranscribe(const char *uuid, const int16_t *pcm, int samples)
+{
+    AiText r = { 0, "" };
+
+    String url = aiServerUrl() + "/stt?session=" + uuid;
+
+    WiFiClient       plain;
+    WiFiClientSecure secure;
+    WiFiClient      *client = &plain;
+    if (url.startsWith("https://")) { secure.setInsecure(); client = &secure; }
+
+    HTTPClient http;
+    if (!http.begin(*client, url)) return r;
+    http.addHeader("Content-Type", "application/octet-stream");
+    String key = aiApiKey();
+    if (key.length()) http.addHeader("X-API-Key", key);
+    http.setTimeout(20000);
+
+    int code = http.POST((uint8_t *)pcm, (size_t)samples * sizeof(int16_t));
+    r.code = code;
+    if (code == 200) r.text = extractText(http.getString());
+    http.end();
+    return r;
+}
