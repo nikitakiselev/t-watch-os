@@ -6,7 +6,6 @@
 #include "../../power.h"
 
 // ───────── Вёрстка по дизайн-макету (240×240, контент 24..240) ─────────
-static const int WORDMARK_Y = STATUSBAR_H / 2;     // «T-WATCH» в статусбаре слева
 static const int DATE_Y     = 44;                  // SUN · 2026.06.07
 static const int ZONE_Y     = 72;                  // ◆ MSK ............ UTC+3
 static const int BIG_Y      = 116;                 // крупные часы (font 7) + ореол
@@ -36,20 +35,6 @@ static void homeBand(int y0, int h)
     for (int x = 0; x <= SCR_W; x += 24) tft->drawFastVLine(x, y0, h, COL_GRID);
     for (int gy = ((y0 + 23) / 24) * 24; gy <= y0 + h; gy += 24)
         tft->drawFastHLine(0, gy, SCR_W, COL_GRID);
-}
-
-// Wordmark «T-WATCH» в левой части статусбара (статусбар его не рисует сам).
-static void drawWordmark()
-{
-    tft->setTextDatum(ML_DATUM);
-    tft->setTextColor(COL_AMBER, COL_BG);
-    tft->drawString("T-WATCH", 6, WORDMARK_Y, 2);
-}
-
-static void homeStatusbar()
-{
-    statusbarDraw();
-    drawWordmark();
 }
 
 // SUN · 2026.06.07  (день недели — маджента, дата — зелёная).
@@ -204,7 +189,7 @@ static void homeEnter()
 {
     themeBackdrop();
     drawGrid();
-    homeStatusbar();
+    statusbarDraw();
 
     RTC_Date now = hwNow();
     drawDate(now);
@@ -238,7 +223,7 @@ static void homeTick()
     snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
     drawBigClock(buf);
     drawAltClocks(now);
-    homeStatusbar();
+    statusbarDraw();
 }
 
 // Тап по экрану — открыть список приложений ([ tap ] в макете).

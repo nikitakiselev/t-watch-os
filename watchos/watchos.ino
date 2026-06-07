@@ -21,6 +21,7 @@
 #include "input.h"
 #include "program.h"
 #include "navbar.h"
+#include "statusbar.h"
 #include "theme.h"
 #include "power.h"
 #include "batterytime.h"
@@ -78,6 +79,8 @@ void loop()
     // Тик выполняем для текущей программы (она могла смениться выше).
     p = kernelCurrent();
     if (p && p->onTick) p->onTick();
+
+    statusbarTick();   // поминутное обновление времени в статусбаре (для всех экранов)
 
     battTimePoll();   // отследить отключение/подключение USB
     powerTick();      // при простое уснёт здесь (light sleep)
