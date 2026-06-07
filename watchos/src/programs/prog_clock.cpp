@@ -3,6 +3,7 @@
 #include "../../statusbar.h"
 #include "../../theme.h"
 #include "../../wifi.h"
+#include "../../modal.h"
 
 // ─────────────────────────────── Вкладки ───────────────────────────────
 // Две вкладки в одном приложении (бывшие Clock и Stopwatch). Переключение —
@@ -166,24 +167,39 @@ static void switchTab(int dir)
 }
 
 // ─────────────────────────── Синхронизация времени (NTP) ───────────────
-static void clockMsg(const char *s, uint16_t c)
+// Статус показываем в общем модальном окне (modalPanel): заголовок «TIME SYNC»
+// + строка стадии. Рамка: янтарь — в процессе, зелёный — успех.
+static void syncPanel(const char *stage, uint16_t border)
 {
-    tft->fillRect(TAP_EDGE, BODY_TOP, SCR_W - 2 * TAP_EDGE, CONTENT_BOTTOM - BODY_TOP, COL_BG);
+    const int w = 190, h = 100, x0 = (SCR_W - w) / 2, y0 = (SCR_H - h) / 2;
+    modalPanel(x0, y0, w, h, 12, border);
     tft->setTextDatum(MC_DATUM);
-    tft->setTextColor(c, COL_BG);
-    tft->drawString(s, SCR_W / 2, ARROW_CY, 4);
-    drawArrows();
+    tft->setTextColor(COL_AMBER, COL_BG);
+    tft->drawString("TIME SYNC", SCR_W / 2, y0 + 26, 2);
+    tft->setTextColor(border, COL_BG);
+    tft->drawString(stage, SCR_W / 2, y0 + 64, 4);
 }
 
 static void clockSync()
 {
-    clockMsg("SYNC...", COL_AMBER);
+    syncPanel("WIFI...", COL_AMBER);                  // стадия 1: поднимаем Wi-Fi
     wifiAcquire();
     if (!wifiConnected()) wifiAutoConnect(12000, nullptr);
-    bool ok = wifiConnected() && hwNtpSync(8000);
+
+    const char *msg;
+    uint16_t    col;
+    if (!wifiConnected()) {
+        msg = "NO WIFI"; col = COL_AMBER;
+    } else {
+        syncPanel("NTP...", COL_AMBER);               // стадия 2: запрос времени
+        bool ok = hwNtpSync(8000);
+        msg = ok ? "SYNCED" : "FAILED";
+        col = ok ? COL_GREEN : COL_AMBER;
+    }
     wifiRelease();                                    // RTC выставлен — Wi-Fi больше не нужен
-    clockMsg(ok ? "SYNCED" : "FAILED", ok ? COL_GREEN : COL_AMBER);
-    delay(900);
+
+    syncPanel(msg, col);
+    delay(1100);
     lastSec = -1;                                     // заставить часы перерисоваться
     drawChrome();
     drawBody();
