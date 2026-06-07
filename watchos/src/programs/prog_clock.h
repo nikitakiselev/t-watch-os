@@ -1,5 +1,6 @@
 #pragma once
 #include "../../program.h"
 
-// Приложение «Clock»: часы реального времени (MSK) с секундами на весь экран.
+// Приложение «Clock»: две вкладки (CLOCK — часы MSK с секундами, STOPWATCH —
+// секундомер). Переключение тапом по боковым стрелкам, как в System.
 extern const Program clockProgram;

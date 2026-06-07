@@ -36,10 +36,29 @@ static void drawCard(int idx)
     tft->drawString(APPS[idx]->name, cx, AREA_TOP + NAME_DY, 4);
 }
 
+// Вертикальная колонка точек слева: по точке на приложение, выбранное —
+// ярче и чуть больше (индикатор позиции в списке).
+static const int DOTS_X = 9;
+
+static const int DOT_GAP = 14;   // расстояние между точками (плотная колонка)
+
+static void drawDots()
+{
+    if (APPS_COUNT <= 1) return;
+    tft->fillRect(0, AREA_TOP, 18, AREA_H, COL_BG);     // очистить колонку
+    int y0 = AREA_TOP + AREA_H / 2 - (APPS_COUNT - 1) * DOT_GAP / 2;   // центрировать по высоте
+    for (int i = 0; i < APPS_COUNT; i++) {
+        int y = y0 + i * DOT_GAP;
+        if (i == selected) tft->fillCircle(DOTS_X, y, 4, COL_AMBER);
+        else               tft->fillCircle(DOTS_X, y, 2, COL_GREEN_DIM);
+    }
+}
+
 static void renderCurrent()
 {
     tft->fillRect(0, AREA_TOP, SCR_W, AREA_H, COL_BG);
     drawCard(selected);
+    drawDots();
 }
 
 static void drawArrows()
@@ -109,7 +128,6 @@ static void menuEvent(InputEvent e, int16_t x, int16_t y)
     switch (e) {
     case EVT_UP:    scrollPrev(); break;
     case EVT_DOWN:  scrollNext(); break;
-    case EVT_CLICK: launchSelected(); break;
     case EVT_TAP:
         if (y < AREA_TOP)               scrollPrev();
         else if (y > AREA_TOP + AREA_H) scrollNext();

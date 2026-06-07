@@ -604,7 +604,6 @@ static void radioEvent(InputEvent e, int16_t x, int16_t y)
     switch (e) {
     case EVT_LEFT:  if (screen < 2) { screen++; drawScreen(); } break;     // листать вправо
     case EVT_RIGHT: if (screen > 0) { screen--; drawScreen(); } break;     // листать влево
-    case EVT_CLICK: togglePlay(); break;                                   // пауза (любой экран)
     case EVT_UP:    if (screen == 0) volStep(+1); break;                   // громче (главный)
     case EVT_DOWN:  if (screen == 0) volStep(-1); break;
     case EVT_TAP:

@@ -35,6 +35,22 @@ void kernelBack()
     }
 }
 
+void kernelHome()
+{
+    if (top <= 0) return;                       // уже на корне — ничего не делаем (без glitch)
+    while (top > 0) {                           // закрыть весь стек, освобождая ресурсы
+        const Program *leaving = stack[top];
+        if (leaving->onExit) leaving->onExit();
+        top--;
+    }
+    enter(stack[top]);                          // перерисовать корень (главный экран) — один раз
+}
+
+bool kernelAtRoot()
+{
+    return top <= 0;
+}
+
 void kernelRedraw()
 {
     const Program *p = kernelCurrent();

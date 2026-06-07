@@ -232,7 +232,6 @@ static void wifiEvent(InputEvent e, int16_t x, int16_t y)
         if (listNavEvent(l, e)) { selected = l.sel; scrollTop = l.top; drawList(); }
         break;
     }
-    case EVT_CLICK: actSelected(); break;
     case EVT_TAP:
         actSelected();                 // тап — применить ВЫДЕЛЕННЫЙ пункт (выбор — свайпами)
         break;

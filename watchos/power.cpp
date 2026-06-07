@@ -38,8 +38,9 @@ static bool appKeepAwake()
 
 static void fadeBacklight(bool down)
 {
-    if (down) for (int b = 255; b >= 0; b -= 17) { watch->setBrightness(b < 0 ? 0 : b); delay(8); }
-    else      for (int b = 0; b <= 255; b += 17) { watch->setBrightness(b > 255 ? 255 : b); delay(8); }
+    int top = hwBrightness();   // целевой уровень — общая яркость ОС (не жёсткие 255)
+    if (down) for (int b = top; b >= 0; b -= 17) { watch->setBrightness(b < 0 ? 0 : b); delay(8); }
+    else      for (int b = 0; b <= top; b += 17) { watch->setBrightness(b > top ? top : b); delay(8); }
 }
 
 // Полная остановка устройства: гасим экран и усыпляем CPU. Пробуждение — кнопкой.
@@ -73,4 +74,9 @@ void powerTick()
         return;
     }
     if (millis() - lastActivity >= SLEEP_IDLE_MS) fullSleep();
+}
+
+void powerSleepNow()
+{
+    fullSleep();   // блокирующий вызов: вернётся после пробуждения кнопкой
 }

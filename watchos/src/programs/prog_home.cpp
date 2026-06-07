@@ -3,6 +3,7 @@
 #include "../../hw.h"
 #include "../../statusbar.h"
 #include "../../theme.h"
+#include "../../power.h"
 
 // Вертикальные позиции (вписаны в CONTENT_TOP..CONTENT_BOTTOM).
 static const int MSK_LABEL_Y = STATUSBAR_H + 14;   // [ MSK ]
@@ -108,14 +109,12 @@ static void homeTick()
     statusbarDraw();
 }
 
-static void homeEvent(InputEvent e, int16_t x, int16_t y)
-{
-    if (e == EVT_CLICK) kernelOpen(&menuProgram);
-}
+// Кнопка на главном экране — уйти в сон (мы уже «дома», закрывать нечего).
+static void homeButton() { powerSleepNow(); }
 
 static void openApps() { kernelOpen(&menuProgram); }
 static const NavButton homeNav[] = { { "Apps", openApps } };
 
 const Program homeProgram = {
-    "Home", homeEnter, homeTick, homeEvent, nullptr, homeNav, 1
+    "Home", homeEnter, homeTick, nullptr, nullptr, homeNav, 1, nullptr, nullptr, nullptr, homeButton
 };

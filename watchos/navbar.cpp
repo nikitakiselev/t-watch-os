@@ -2,8 +2,8 @@
 #include "hw.h"
 #include "theme.h"
 
-// Кнопка по умолчанию — «Back» (возврат на предыдущую программу).
-static const NavButton DEFAULT_NAV[] = { { "Back", kernelBack } };
+// Кнопка по умолчанию — «Exit» (выход из приложения в список).
+static const NavButton DEFAULT_NAV[] = { { "Exit", kernelBack } };
 
 // Возвращает действующий набор кнопок программы (или дефолтный).
 static void resolveNav(const Program *p, const NavButton **btns, int *n)
@@ -34,9 +34,9 @@ void navbarDraw(const Program *p)
     for (int i = 0; i < n; i++) {
         int x0 = i * w;
         if (i > 0) tft->drawFastVLine(x0, top + 5, NAVBAR_H - 10, COL_FRAME);
-        // «Назад» — янтарный акцент, остальные — зелёные.
-        bool back = btns[i].label && btns[i].label[0] == 'B';
-        tft->setTextColor(back ? COL_AMBER : COL_GREEN, COL_BG);
+        // Кнопка выхода (kernelBack) — янтарный акцент, остальные — зелёные.
+        bool exit = btns[i].onPress == kernelBack;
+        tft->setTextColor(exit ? COL_AMBER : COL_GREEN, COL_BG);
         tft->drawString(btns[i].label, x0 + w / 2, top + NAVBAR_H / 2, 2);
     }
 }

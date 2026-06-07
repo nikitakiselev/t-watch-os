@@ -1,5 +1,7 @@
 #include "hw.h"
 #include <time.h>
+#include <math.h>
+#include <Preferences.h>
 
 // Реальное время хоста на момент сборки (UNIX-эпоха, UTC) — подставляется
 // генератором build_time.h перед компиляцией. 0 — фоллбэк на время компиляции.
@@ -14,6 +16,43 @@
 
 TTGOClass *watch = nullptr;
 TFT_eSPI  *tft   = nullptr;
+
+// ─────────────────────────── Яркость дисплея ───────────────────────────
+static const uint8_t BRIGHT_MIN = 20;     // ниже — экран практически не виден
+static uint8_t       gBright     = 255;    // текущий уровень (общий на всю ОС)
+
+uint8_t hwBrightness() { return gBright; }
+
+void hwSetBrightness(uint8_t level)
+{
+    if (level < BRIGHT_MIN) level = BRIGHT_MIN;
+    gBright = level;
+    if (watch) watch->setBrightness(gBright);
+
+    Preferences p;                          // сохранить в NVS (namespace "settings")
+    if (p.begin("settings", false)) { p.putUChar("bright", gBright); p.end(); }
+}
+
+void hwVibrate(int ms)
+{
+    // Не tone (onec = ~50% скважность, слишком сильно), а слабый ШИМ: мотор на
+    // канале ledc настроен на 1 кГц / 8 бит, низкая скважность → мягкий импульс.
+    static const uint8_t VIBE_DUTY = 45;     // 0..255 — сила (меньше = слабее)
+    static bool inited = false;
+    if (!inited) { watch->motor_begin(); inited = true; }
+    if (!watch->motor) return;
+    watch->motor->adjust(VIBE_DUTY);
+    delay(ms);
+    watch->motor->adjust(0);
+}
+
+static void brightnessBegin()               // загрузить из NVS и применить (при старте)
+{
+    Preferences p;
+    if (p.begin("settings", true)) { gBright = p.getUChar("bright", 255); p.end(); }
+    if (gBright < BRIGHT_MIN) gBright = BRIGHT_MIN;
+    watch->setBrightness(gBright);
+}
 
 // (год,мес,день,ч,м,с) a позже b ?
 static bool dateAfter(const struct tm &a, const RTC_Date &b)
@@ -52,7 +91,7 @@ void hwBegin()
     watch = TTGOClass::getWatch();
     watch->begin();               // AXP202 + ST7789 + датчики
     watch->openBL();              // подсветка
-    watch->setBrightness(255);
+    brightnessBegin();            // яркость из NVS (общая на ОС), применить
     tft = watch->tft;
 
     // Включаем ADC-каналы AXP202 для измерения тока/мощности (по умолчанию
@@ -88,6 +127,49 @@ int hwBattPercent()
 RTC_Date hwNow()
 {
     return watch->rtc->getDateTime();
+}
+
+// ─────────────────────────── Акселерометр (BMA423) ───────────────────────
+static bool accelReady = false;
+
+void hwAccelBegin()
+{
+    if (accelReady) return;
+    Acfg cfg;
+    cfg.odr       = BMA4_OUTPUT_DATA_RATE_100HZ;
+    cfg.range     = BMA4_ACCEL_RANGE_2G;
+    cfg.bandwidth = BMA4_ACCEL_NORMAL_AVG4;
+    cfg.perf_mode = BMA4_CONTINUOUS_MODE;
+    watch->bma->accelConfig(cfg);
+    watch->bma->enableAccel();
+    accelReady = true;
+}
+
+bool hwAccelRead(int16_t &x, int16_t &y, int16_t &z)
+{
+    hwAccelBegin();
+    Accel a;
+    if (!watch->bma->getAccel(a)) return false;
+    x = a.x; y = a.y; z = a.z;
+    return true;
+}
+
+// Поправка ориентации датчика под экран T-Watch 2020 V3 (оси повёрнуты на 90°):
+//   горизонталь экрана (вправо) ← +Y,  вертикаль (вниз) ← -X.
+void hwAccelToScreen(int16_t x, int16_t y, int16_t z, float &sx, float &sy)
+{
+    float mag = sqrtf((float)((int32_t)x * x + (int32_t)y * y + (int32_t)z * z));
+    if (mag < 1.0f) mag = 1.0f;
+    sx =  y / mag;
+    sy = -x / mag;
+}
+
+const char *hwAccelDirection(int16_t x, int16_t y, int16_t z)
+{
+    int ax = abs(x), ay = abs(y), az = abs(z);
+    if (az > ax && az > ay) return z > 0 ? "FACE DOWN" : "FACE UP";
+    if (ax > ay && ax > az) return x < 0 ? "BOTTOM DN" : "TOP DN";
+    return y > 0 ? "RIGHT DN" : "LEFT DN";
 }
 
 void hwTimeInZone(const RTC_Date &base, int offsetMin, int &h, int &m, int &s)
