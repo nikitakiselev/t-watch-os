@@ -3,16 +3,8 @@
 #include <math.h>
 #include <Preferences.h>
 
-// Реальное время хоста на момент сборки (UNIX-эпоха, UTC) — подставляется
-// генератором build_time.h перед компиляцией. 0 — фоллбэк на время компиляции.
-#if defined(__has_include)
-#  if __has_include("build_time.h")
-#    include "build_time.h"
-#  endif
-#endif
-#ifndef BUILD_UNIX_TIME
-#  define BUILD_UNIX_TIME 0
-#endif
+// Время RTC при старте НЕ трогаем: RTC батарейный, а актуализация — через NTP
+// (Clock → Sync). Раньше здесь был синк из времени сборки (build_time.h) — убран.
 
 TTGOClass *watch = nullptr;
 TFT_eSPI  *tft   = nullptr;
@@ -54,38 +46,6 @@ static void brightnessBegin()               // загрузить из NVS и п
     watch->setBrightness(gBright);
 }
 
-// (год,мес,день,ч,м,с) a позже b ?
-static bool dateAfter(const struct tm &a, const RTC_Date &b)
-{
-    long ai[6] = { a.tm_year + 1900, a.tm_mon + 1, a.tm_mday, a.tm_hour, a.tm_min, a.tm_sec };
-    long bi[6] = { b.year, b.month, b.day, b.hour, b.minute, b.second };
-    for (int i = 0; i < 6; i++) {
-        if (ai[i] != bi[i]) return ai[i] > bi[i];
-    }
-    return false;
-}
-
-// Выставляем RTC (базовый пояс — MSK) из реального времени сборки, если оно
-// новее текущего RTC. RTC батарейный — выставив однажды, дальше идёт сам.
-static void syncClock()
-{
-    RTC_Date r = watch->rtc->getDateTime();
-
-#if (BUILD_UNIX_TIME > 0)
-    time_t msk = (time_t)BUILD_UNIX_TIME + (time_t)3 * 3600;   // MSK = UTC+3
-    struct tm bt;
-    gmtime_r(&msk, &bt);
-    if (r.year < 2024 || dateAfter(bt, r)) {
-        watch->rtc->setDateTime(RTC_Date(bt.tm_year + 1900, bt.tm_mon + 1, bt.tm_mday,
-                                         bt.tm_hour, bt.tm_min, bt.tm_sec));
-    }
-#else
-    if (r.year < 2024) {
-        watch->rtc->setDateTime(RTC_Date(__DATE__, __TIME__));   // фоллбэк
-    }
-#endif
-}
-
 // Синхронизация RTC по NTP. Wi-Fi должен быть уже поднят вызывающим.
 bool hwNtpSync(uint32_t timeoutMs)
 {
@@ -120,7 +80,7 @@ void hwBegin()
     watch->power->adc1Enable(AXP202_BATT_VOL_ADC1 | AXP202_BATT_CUR_ADC1 |
                              AXP202_VBUS_VOL_ADC1 | AXP202_VBUS_CUR_ADC1, true);
 
-    syncClock();
+    // RTC при старте не трогаем — актуализация через NTP (Clock → Sync).
 
     // Кнопка питания (AXP202 PEK): короткое и долгое нажатие через IRQ.
     watch->power->enableIRQ(AXP202_PEK_SHORTPRESS_IRQ | AXP202_PEK_LONGPRESS_IRQ, true);

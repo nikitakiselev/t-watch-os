@@ -27,7 +27,7 @@ ESPTOOL     := $(firstword $(wildcard $(ESP32TOOLS)/esptool_py/*/esptool))
 SPIFFS_OFF  := 0xc90000
 SPIFFS_SIZE := 3538944          # 0x360000 (раздел spiffs в default_16MB)
 
-.PHONY: all time build flash upload fs monitor ports clean sprites vu font
+.PHONY: all build flash upload fs monitor ports clean sprites vu font
 
 all: flash
 
@@ -43,13 +43,10 @@ vu:
 font:
 	python3 tools/gen_font.py
 
-# Реальное время хоста → build_time.h. Из него RTC ставится при старте,
-# иначе часы показывают неверное время. Генерируется при каждой сборке.
-time:
-	@printf '#pragma once\n#define BUILD_UNIX_TIME %sUL\n' "$$(date +%s)" > $(SKETCH)/build_time.h
-	@echo "build_time.h -> $$(date '+%Y-%m-%d %H:%M:%S %Z')"
+# Время RTC актуализируется через NTP (Clock → Sync), а не из времени сборки —
+# поэтому build_time.h больше не генерируется при сборке.
 
-build: time
+build:
 	$(CLI) compile --fqbn $(FQBN) ./$(SKETCH)
 
 flash upload: build
