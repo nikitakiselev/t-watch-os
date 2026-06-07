@@ -27,7 +27,7 @@ ESPTOOL     := $(firstword $(wildcard $(ESP32TOOLS)/esptool_py/*/esptool))
 SPIFFS_OFF  := 0xc90000
 SPIFFS_SIZE := 3538944          # 0x360000 (раздел spiffs в default_16MB)
 
-.PHONY: all time build flash upload fs monitor ports clean sprites vu
+.PHONY: all time build flash upload fs monitor ports clean sprites vu font
 
 all: flash
 
@@ -38,6 +38,10 @@ sprites:
 # Подложка VU-метра: data/img/vu-meter.png (240×130) -> src/programs/vu_gen.h (RGB565)
 vu:
 	python3 tools/gen_vu.py
+
+# Кириллический VLW-шрифт: TTF -> watchos/notesfont.h (для просмотрщика заметок).
+font:
+	python3 tools/gen_font.py
 
 # Реальное время хоста → build_time.h. Из него RTC ставится при старте,
 # иначе часы показывают неверное время. Генерируется при каждой сборке.
