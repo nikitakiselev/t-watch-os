@@ -2,6 +2,7 @@
 #include "../../hw.h"
 #include "../../statusbar.h"
 #include "../../theme.h"
+#include "../../wifi.h"
 
 // ─────────────────────────────── Вкладки ───────────────────────────────
 // Две вкладки в одном приложении (бывшие Clock и Stopwatch). Переключение —
@@ -135,9 +136,13 @@ static void drawNavbar()
         tft->drawString("Run", w + w / 2, top + NAVBAR_H / 2, 2);
         tft->drawFastVLine(2 * w, top + 5, NAVBAR_H - 10, COL_FRAME);
         tft->drawString("Reset", 2 * w + w / 2, top + NAVBAR_H / 2, 2);
-    } else {
+    } else {                                         // TAB_CLOCK: Exit | Sync
+        const int w = SCR_W / 2;
         tft->setTextColor(COL_AMBER, COL_BG);
-        tft->drawString("Exit", SCR_W / 2, top + NAVBAR_H / 2, 2);
+        tft->drawString("Exit", w / 2, top + NAVBAR_H / 2, 2);
+        tft->drawFastVLine(w, top + 5, NAVBAR_H - 10, COL_FRAME);
+        tft->setTextColor(COL_GREEN, COL_BG);
+        tft->drawString("Sync", w + w / 2, top + NAVBAR_H / 2, 2);
     }
 }
 
@@ -155,6 +160,31 @@ static void switchTab(int dir)
     int next = curTab + dir;
     if (next < 0 || next >= NUM_TABS) return;
     curTab = next;
+    drawChrome();
+    drawBody();
+    drawNavbar();
+}
+
+// ─────────────────────────── Синхронизация времени (NTP) ───────────────
+static void clockMsg(const char *s, uint16_t c)
+{
+    tft->fillRect(TAP_EDGE, BODY_TOP, SCR_W - 2 * TAP_EDGE, CONTENT_BOTTOM - BODY_TOP, COL_BG);
+    tft->setTextDatum(MC_DATUM);
+    tft->setTextColor(c, COL_BG);
+    tft->drawString(s, SCR_W / 2, ARROW_CY, 4);
+    drawArrows();
+}
+
+static void clockSync()
+{
+    clockMsg("SYNC...", COL_AMBER);
+    wifiAcquire();
+    if (!wifiConnected()) wifiAutoConnect(12000, nullptr);
+    bool ok = wifiConnected() && hwNtpSync(8000);
+    wifiRelease();                                    // RTC выставлен — Wi-Fi больше не нужен
+    clockMsg(ok ? "SYNCED" : "FAILED", ok ? COL_GREEN : COL_AMBER);
+    delay(900);
+    lastSec = -1;                                     // заставить часы перерисоваться
     drawChrome();
     drawBody();
     drawNavbar();
@@ -205,8 +235,9 @@ static void clockEvent(InputEvent e, int16_t x, int16_t y)
             if (x < w)       kernelBack();
             else if (x < 2 * w) swToggle();
             else             swReset();
-        } else {
-            kernelBack();
+        } else {                                  // TAB_CLOCK: Exit | Sync
+            if (x < SCR_W / 2) kernelBack();
+            else               clockSync();
         }
     } else if (x < TAP_EDGE) {
         switchTab(-1);                            // тап по левой стрелке

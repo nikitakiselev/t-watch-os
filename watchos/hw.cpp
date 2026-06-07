@@ -86,6 +86,27 @@ static void syncClock()
 #endif
 }
 
+// Синхронизация RTC по NTP. Wi-Fi должен быть уже поднят вызывающим.
+bool hwNtpSync(uint32_t timeoutMs)
+{
+    configTime(0, 0, "pool.ntp.org", "time.google.com", "time.nist.gov");  // UTC
+    uint32_t start = millis();
+    time_t now = 0;
+    while (millis() - start < timeoutMs) {
+        now = time(nullptr);
+        if (now > 1700000000) break;          // получили реальное время (после ~2023-11)
+        delay(150);
+    }
+    if (now <= 1700000000) return false;
+
+    time_t msk = now + (time_t)3 * 3600;      // RTC хранит MSK = UTC+3
+    struct tm bt;
+    gmtime_r(&msk, &bt);
+    watch->rtc->setDateTime(RTC_Date(bt.tm_year + 1900, bt.tm_mon + 1, bt.tm_mday,
+                                     bt.tm_hour, bt.tm_min, bt.tm_sec));
+    return true;
+}
+
 void hwBegin()
 {
     watch = TTGOClass::getWatch();

@@ -25,6 +25,10 @@ void    hwVibrate(int ms);
 // Текущее время RTC (базовый пояс — MSK).
 RTC_Date hwNow();
 
+// Синхронизировать RTC по NTP (интернет). Требует уже поднятого Wi-Fi.
+// Блокирует до timeoutMs. true — успех (RTC выставлен в MSK). Wi-Fi не трогает.
+bool hwNtpSync(uint32_t timeoutMs);
+
 // Перевести время RTC в нужный пояс по смещению в минутах.
 // Возвращает часы/минуты/секунды этого пояса (с переносом через сутки).
 void hwTimeInZone(const RTC_Date &base, int offsetMin, int &h, int &m, int &s);
