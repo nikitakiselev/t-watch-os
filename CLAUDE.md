@@ -20,6 +20,7 @@ make build      # только собрать
 make flash      # собрать + прошить (PORT определяется сам; переопределить: make flash PORT=/dev/cu.usbserial-XXXX)
 make fs         # залить ТОЛЬКО watchos/data/ в SPIFFS (станции радио) без перепрошивки кода
 make sprites    # пересобрать спрайты игры: sprites/N.png -> sprites.png + sprites_gen.h
+make font       # пересобрать кириллический VLW-шрифт заметок: TTF -> watchos/notesfont.h
 make monitor    # серийный монитор, 115200
 make ports      # список плат
 make clean      # очистить кэш arduino-cli + удалить build_time.h
@@ -92,6 +93,14 @@ make clean      # очистить кэш arduino-cli + удалить build_tim
   шрифты). Встроенные шрифты TFT_eSPI: **font 1** (6×8 моноширинный, полный CP437 — для ASCII-арта,
   канва 40×30), **font 2** (16px), **font 4** (26px), **font 6/7** (48px; 7 — семисегментный,
   только цифры и двоеточие).
+- **Исключение — текст заметок (Notes): единственное место с кириллицей.** Используется встроенный
+  VLW-шрифт `watchos/notesfont.h` (генерируется `make font` → `tools/gen_font.py` из системного TTF;
+  латиница + кириллица, ~18px). Грузится через `tft->loadFont(notesfont)` / `unloadFont()` — обёртки
+  `textFontLoad()/textFontUnload()` в `textview.*`. Между load/unload `drawString`/`textWidth`
+  рисуют этим шрифтом UTF-8 (`SMOOTH_FONT` + `decodeUTF8` встроенного TFT_eSPI); после unload — снова
+  штатные font 1/2/4. **Метки UI остаются английскими** — кириллица только в контенте заметок.
+  Прокрутка длинного текста — компонент `textview.*` (word-wrap + скроллбар справа). Распознавание
+  речи в текст — серверный эндпоинт `/stt` (`aiTranscribe` в `aiclient.*`, рядом с `/talk`).
 - **`TFT_eSprite` ненадёжно рисует font 1** (GLCD уходит мимо буфера спрайта). Поэтому спрайтовую
   анимацию с ASCII-текстом НЕ использовать. Анимация списка приложений сделана простым glitch-эффектом
   + прямой отрисовкой. Встроенный TFT_eSPI старый — `setViewport` отсутствует.
